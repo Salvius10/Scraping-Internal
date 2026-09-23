@@ -186,6 +186,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--source", help="restrict to one source by name")
     ap.add_argument("--skip-paid", action="store_true",
                     help="RSS sources only; skip anything that costs money")
+    ap.add_argument("--no-describe", action="store_true",
+                    help="skip fetching publisher descriptions (free step)")
+    ap.add_argument("--no-enrich", action="store_true",
+                    help="skip company/category classification (the paid step)")
     args = ap.parse_args(argv)
 
     if not args.once:
@@ -193,6 +197,27 @@ def main(argv: list[str] | None = None) -> int:
 
     runs = run_once(only=args.source, skip_paid=args.skip_paid)
     _report(runs)
+
+    if not args.no_describe:
+        from .describe import describe_pending
+        print("\ndescribe: %d articles improved from publisher metadata (free)"
+              % describe_pending())
+
+    if not args.no_enrich:
+        from .enrich import enrich_pending
+        result = enrich_pending()
+        print("enrich:   %d/%d classified in %d batch(es), $%.6f"
+              % (result.updated, result.considered, result.batches,
+                 result.cost_usd))
+        if result.stopped_reason:
+            print("          stopped early: %s" % result.stopped_reason[:90])
+
+        # Second dedupe pass, now that companies are known. Free.
+        from .dedupe import dedupe_by_company
+        with session_scope() as s:
+            merged = dedupe_by_company(s)
+        print("dedupe:   %d further duplicates merged by company (free)" % merged)
+
     return 1 if any(r.error for r in runs) else 0
 
 

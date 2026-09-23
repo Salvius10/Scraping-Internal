@@ -30,6 +30,9 @@ def _sqlite_pragmas(dbapi_conn, _record):
     cur.execute("PRAGMA journal_mode=WAL")      # concurrent reads during ingest
     cur.execute("PRAGMA foreign_keys=ON")
     cur.execute("PRAGMA synchronous=NORMAL")
+    # Wait rather than fail if another connection holds a brief write
+    # lock -- the ledger writes on its own connection during ingest.
+    cur.execute("PRAGMA busy_timeout=10000")
     cur.close()
 
 

@@ -67,6 +67,33 @@ def numeric_signature(headline: str) -> frozenset[str]:
                      if w.isdigit())
 
 
+def significant_figures(headline: str) -> frozenset[str]:
+    """Numbers that identify a deal, with calendar years removed.
+
+    A year is context, not evidence: "Ultraviolette raises $85 Mn, targets US
+    expansion in 2027" and "Ultraviolette raises $85M in Series E" describe one
+    round, but strict signature equality sees {85, 2027} against {85} and
+    keeps them apart. Dropping years leaves the figure that actually
+    identifies the deal -- and two different rounds still differ on it.
+    """
+    return frozenset(
+        n for n in numeric_signature(headline)
+        if not (len(n) == 4 and 1900 <= int(n) <= 2100)
+    )
+
+
+def figures_conflict(a: str, b: str) -> bool:
+    """True when two headlines cite different deal figures.
+
+    Only meaningful when both cite figures: a headline with no numbers is not
+    evidence either way.
+    """
+    fa, fb = significant_figures(a), significant_figures(b)
+    if not fa or not fb:
+        return False
+    return not (fa & fb)
+
+
 def story_key(headline: str) -> str:
     """Stable key from the most distinctive tokens.
 
@@ -103,6 +130,9 @@ def containment(a: frozenset[str], b: frozenset[str]) -> float:
 # Below this many tokens, containment saturates on trivial overlaps, so short
 # headlines are judged on Jaccard alone.
 MIN_TOKENS_FOR_CONTAINMENT = 4
+
+# Floor for the company pass when no figures corroborate the match.
+MIN_SIMILARITY_WITHOUT_FIGURES = 0.25
 
 # Headlines that bundle several unrelated stories into one article.
 _ROUNDUP_MARKER = re.compile(
@@ -166,6 +196,83 @@ def headline_similarity(a: str, b: str) -> float:
     if is_multi_topic(longer, other):
         return jaccard(ta, tb)  # containment is untrustworthy here
     return similarity(ta, tb)
+
+
+def dedupe_by_company(session: Session, window_hours: int = 48) -> int:
+    """Second pass: merge stories that share a company, category and figures.
+
+    Headline similarity cannot catch every rewrite. Two outlets covering the
+    same round wrote "Ultraviolette raises $85 Mn, targets US expansion in
+    2027" and "EV company Ultraviolette raises $85M in Series E led by deeptech
+    fund Yali Capital" -- they share only the company and the amount, scoring
+    0.4, so both appeared in the feed.
+
+    Enrichment has since extracted the company, so this runs afterwards and
+    uses it. The numeric signature still has to match, which keeps a company's
+    Series F and Series G apart.
+
+    Returns the number of articles newly marked as duplicates.
+    """
+    candidates = session.scalars(
+        select(Article)
+        .where(
+            Article.canonical_id.is_(None),
+            Article.company.is_not(None),
+            Article.published_at.is_not(None),
+        )
+        .order_by(Article.published_at.asc())
+    ).all()
+
+    # (company, category) -> articles already accepted as canonical
+    groups: dict[tuple[str, str], list[Article]] = {}
+    merged = 0
+
+    for article in candidates:
+        key = (
+            (article.company or "").strip().lower(),
+            article.category.value if article.category else "",
+        )
+        figures = significant_figures(article.headline)
+        bucket = groups.setdefault(key, [])
+
+        canonical = None
+        for earlier in bucket:
+            if figures_conflict(earlier.headline, article.headline):
+                continue
+            gap = abs((article.published_at - earlier.published_at).total_seconds())
+            if gap > window_hours * 3600:
+                continue
+
+            longer, other = (
+                (earlier.headline, article.headline)
+                if len(normalise_tokens(earlier.headline))
+                >= len(normalise_tokens(article.headline))
+                else (article.headline, earlier.headline)
+            )
+            # A roundup mentioning this company is not the same story as the
+            # company's own article, however well the metadata lines up.
+            if is_multi_topic(longer, other):
+                continue
+
+            # Matching figures are strong corroboration on their own. With no
+            # figures at all, company and category are too weak a pair -- two
+            # separate remarks by one executive at one event would collapse --
+            # so require the headlines to at least be in the same territory.
+            if not figures and headline_similarity(
+                earlier.headline, article.headline
+            ) < MIN_SIMILARITY_WITHOUT_FIGURES:
+                continue
+
+            canonical = earlier
+            break
+
+        if canonical is not None:
+            article.canonical_id = canonical.id
+            merged += 1
+        else:
+            bucket.append(article)
+
+    return merged
 
 
 def url_hash(url: str) -> str:

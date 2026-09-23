@@ -161,3 +161,32 @@ def test_company_name_still_drives_a_real_match() -> None:
     assert looks_duplicate(
         "Industrial workforce startup Factrika raises Rs 8.9 crore in seed funding",
         "Info Edge leads Rs 8.9 Cr seed round in Factrika")
+
+
+# --- Significant figures (company pass) -------------------------------------
+
+def test_years_are_not_deal_figures() -> None:
+    """A year is context. Treating it as evidence split one round in two."""
+    from app.ingest.dedupe import significant_figures
+    assert significant_figures("raises $85 Mn, targets US expansion in 2027") == frozenset({"85"})
+    assert significant_figures("Ecosystem Pulse - Sept 22, 2026") == frozenset({"22"})
+
+
+def test_same_round_described_with_and_without_a_year() -> None:
+    from app.ingest.dedupe import figures_conflict
+    assert not figures_conflict(
+        "Ultraviolette raises $85 Mn, targets US expansion in 2027",
+        "EV company Ultraviolette raises $85M in Series E led by Yali Capital")
+
+
+def test_different_rounds_for_one_company_still_conflict() -> None:
+    from app.ingest.dedupe import figures_conflict
+    assert figures_conflict(
+        "Zepto raises Rs 500 crore in Series F funding",
+        "Zepto raises Rs 900 crore in Series G funding")
+
+
+def test_a_headline_without_figures_is_not_evidence() -> None:
+    from app.ingest.dedupe import figures_conflict
+    assert not figures_conflict("Spinny confidentially files for IPO",
+                                "Spinny files IPO papers, eyes Rs 3,000 Cr")
