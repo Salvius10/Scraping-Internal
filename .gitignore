@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.db
+*.db-journal
+.env
+node_modules/
+dist/
+scripts/discovery_report.json

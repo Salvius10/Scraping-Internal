@@ -1,0 +1,84 @@
+# Source registry -- the only file to edit to add or remove a source.
+# Every entry was verified by scripts/discover_feeds.py on 2026-09-23.
+#
+# strategy:
+#   rss    -> free. feedparser reads feed_url on the 12h schedule.
+#   scrape -> costs ~$0.0024/run. ScrapeGraphAI extracts the listing page.
+#
+# live_search: how the Intelligence section reaches this source in real time.
+#   search_feed -> free, targeted RSS of search results. Best case.
+#   feed_refetch-> free, but only returns whatever is newest (not query-aware).
+#   search_html -> needs parsing; only fired when free paths return too little.
+
+sources:
+  - name: indianstartupnews
+    label: Indian Startup News
+    home: https://indianstartupnews.com/
+    strategy: rss
+    feed_url: https://indianstartupnews.com/rss
+    feed_depth: 50          # items returned -- deep enough for 12h cadence
+    live_search:
+      kind: search_html
+      url: "https://indianstartupnews.com/search?q={q}"
+
+  - name: entrackr
+    label: Entrackr
+    home: https://entrackr.com/
+    strategy: rss
+    feed_url: https://entrackr.com/rss
+    feed_depth: 50
+    live_search:
+      kind: search_html
+      url: "https://entrackr.com/?s={q}"
+
+  - name: inc42
+    label: Inc42
+    home: https://inc42.com/
+    strategy: rss
+    feed_url: https://inc42.com/feed/
+    feed_depth: 24
+    live_search:
+      kind: search_feed   # VERIFIED: returns a real filtered RSS. Free + live.
+      url: "https://inc42.com/?s={q}&feed=rss2"
+
+  - name: yourstory
+    label: YourStory
+    home: https://yourstory.com/
+    strategy: rss
+    feed_url: https://yourstory.com/feed
+    feed_depth: 20
+    live_search:
+      kind: feed_refetch  # not classic WordPress; ?s= is ignored
+      url: https://yourstory.com/feed
+
+  - name: sujatachronicle
+    label: Sujata Chronicle
+    home: https://sujatachronicle.com/
+    strategy: rss         # /feed 404s but /feed.xml is declared in <head>
+    feed_url: https://sujatachronicle.com/feed.xml
+    feed_depth: 20
+    live_search:
+      kind: feed_refetch
+      url: https://sujatachronicle.com/feed.xml
+
+  - name: vccircle
+    label: VCCircle
+    home: https://www.vccircle.com/
+    strategy: scrape      # the ONLY paid source. No RSS exists anywhere.
+    listing_url: https://www.vccircle.com/
+    live_search:
+      kind: search_html
+      url: "https://www.vccircle.com/search?q={q}"
+
+# --- Excluded, with reasons -------------------------------------------------
+excluded:
+  - name: moneycontrol
+    reason: >
+      RSS abandoned. Every feed (/rss/latestnews.xml, technology, business,
+      economy, buzzingstocks) is frozen at Apr 2024; /rss/startups.xml returns
+      503. Content is markets/stocks, not startup ecosystem. Poor topical fit
+      and would need scraping a bot-protected site for news we do not want.
+  - name: aiboomi
+    reason: >
+      aiboomi.org/feed/ is a valid RSS feed with ZERO items. It is a
+      community/events organisation (SaaSBoomi lineage), not a news publisher.

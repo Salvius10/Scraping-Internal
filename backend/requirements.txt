@@ -1,0 +1,25 @@
+# Core API
+fastapi==0.141.1
+uvicorn[standard]==0.38.0
+pydantic==2.12.3
+pydantic-settings==2.12.0
+
+# Storage
+SQLAlchemy==2.0.46
+
+# Ingest -- RSS is the free path for 5 of 6 sources
+feedparser==6.0.14
+httpx==0.28.1
+beautifulsoup4==4.14.2       # og:description extraction
+dateparser==1.2.2            # normalises "2 hours ago" on listing pages
+PyYAML==6.0.3                # sources.yaml
+APScheduler==3.11.0          # 12h refresh
+
+# LLM -- Bedrock only (gpt-oss-120b for bulk, Sonnet 4.6 opt-in)
+boto3==1.43.100
+
+# Paid extraction path -- VCCircle only, the single feedless source
+scrapegraphai==2.2.4
+
+# Dev
+pytest==8.4.2
