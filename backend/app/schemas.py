@@ -63,6 +63,9 @@ class StatusOut(BaseModel):
     last_refresh: datetime | None
     hours_since_refresh: float | None
     refresh_interval_hours: int
+    # When the in-process scheduler runs next; None when it is not running
+    # (ingest by hand, or by `python -m app.scheduler` in another process).
+    next_refresh: datetime | None = None
     article_count: int
     newest_published: datetime | None
     recency_window_days: int

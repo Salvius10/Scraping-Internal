@@ -1,7 +1,9 @@
 """Ingest orchestration.
 
-Phase 2 scope: RSS only, no LLM calls, no cost. Scraped sources (VCCircle) and
-enrichment are wired in at Phases 4 and 5 through the same entry point.
+`refresh()` is the full run: fetch every source, then describe (free), enrich
+(paid) and dedupe by company (free). The CLI and the 12-hour scheduler
+(`app.scheduler`) both call it, so a manual run and a scheduled one are the
+same code path.
 
 Run it directly:
     python -m app.ingest.pipeline --once
@@ -15,6 +17,7 @@ import hashlib
 import logging
 import sys
 import time
+from dataclasses import dataclass, field
 
 import httpx
 from sqlalchemy import func, select
@@ -23,9 +26,10 @@ from sqlalchemy.orm import Session
 from ..config import settings
 from ..db import init_db, session_scope
 from ..models import Article, Chunk, DescriptionOrigin, IngestRun, utcnow
+from .chunks import chunk_body, sync_chunk
 from .dedupe import find_canonical, story_key, url_hash
 from .rss import FeedItem, fetch_feed
-from .sources import Source, load_sources, rss_sources
+from .sources import Source, load_sources
 
 log = logging.getLogger(__name__)
 
@@ -45,6 +49,7 @@ def store_item(session: Session, item: FeedItem) -> str:
         if not existing.description and item.description:
             existing.description = item.description
             existing.description_origin = DescriptionOrigin.FEED
+            sync_chunk(session, existing)
         return "known"
 
     canonical = find_canonical(session, item.headline, item.published_at)
@@ -64,10 +69,8 @@ def store_item(session: Session, item: FeedItem) -> str:
     session.add(article)
     session.flush()  # assign article.id
 
-    body = item.headline
-    if item.description:
-        body = f"{item.headline}\n\n{item.description}"
-    session.add(Chunk(article_id=article.id, chunk_index=0, text=body))
+    session.add(Chunk(article_id=article.id, chunk_index=0,
+                      text=chunk_body(item.headline, item.description)))
 
     return "duplicate" if canonical else "new"
 
@@ -88,11 +91,8 @@ def ingest_source(source: Source, client: httpx.Client) -> IngestRun:
         if source.strategy == "rss":
             items = fetch_feed(source, client=client)
         elif source.strategy == "scrape":
-            # The only paid path. Note that ScrapeGraphAI calls Bedrock
-            # directly, so this spend does not appear in the ledger.
-            from .scraper_sgai import estimate_run_cost, scrape_listing
-            log.warning("%s: scraping via ScrapeGraphAI -- spend is NOT "
-                        "ledgered (est. ~$%.5f)", source.name, estimate_run_cost())
+            # The only paid path; each call is cap-checked and ledgered.
+            from .scraper_sgai import scrape_listing
             items = scrape_listing(source)
         else:
             log.warning("%s: unknown strategy %r, skipping",
@@ -139,6 +139,51 @@ def run_once(only: str | None = None, skip_paid: bool = False) -> list[IngestRun
                 time.sleep(settings.per_domain_delay)  # be a polite guest
             runs.append(ingest_source(source, client))
     return runs
+
+
+@dataclass
+class RefreshResult:
+    """Everything one full refresh did, for the CLI report and the scheduler log."""
+
+    runs: list[IngestRun] = field(default_factory=list)
+    described: int | None = None       # None when the step was skipped
+    enrich: object | None = None       # EnrichResult, or None when skipped
+    merged: int | None = None
+    chunks_synced: int = 0
+
+    @property
+    def failed(self) -> bool:
+        return any(r.error for r in self.runs)
+
+
+def refresh(
+    only: str | None = None,
+    skip_paid: bool = False,
+    describe: bool = True,
+    enrich: bool = True,
+) -> RefreshResult:
+    """One full refresh: ingest, describe, enrich, second dedupe pass."""
+    result = RefreshResult(runs=run_once(only=only, skip_paid=skip_paid))
+
+    if describe:
+        from .describe import describe_pending
+        result.described = describe_pending()
+
+    if enrich:
+        from .enrich import enrich_pending
+        result.enrich = enrich_pending()
+
+        # Second dedupe pass, now that companies are known. Free.
+        from .dedupe import dedupe_by_company
+        with session_scope() as s:
+            result.merged = dedupe_by_company(s)
+
+    # Belt and braces: citations must quote what is stored. Free.
+    from .chunks import sync_all_chunks
+    with session_scope() as s:
+        result.chunks_synced = sync_all_chunks(s)
+
+    return result
 
 
 def _report(runs: list[IngestRun]) -> None:
@@ -193,32 +238,33 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     if not args.once:
-        ap.error("only --once is supported right now (scheduler lands in Phase 6)")
+        ap.error("pass --once for a single run; for the 12h schedule run "
+                 "`python -m app.scheduler` or start the API server")
 
-    runs = run_once(only=args.source, skip_paid=args.skip_paid)
-    _report(runs)
+    result = refresh(
+        only=args.source, skip_paid=args.skip_paid,
+        describe=not args.no_describe, enrich=not args.no_enrich,
+    )
+    _report(result.runs)
 
-    if not args.no_describe:
-        from .describe import describe_pending
+    if result.described is not None:
         print("\ndescribe: %d articles improved from publisher metadata (free)"
-              % describe_pending())
+              % result.described)
 
-    if not args.no_enrich:
-        from .enrich import enrich_pending
-        result = enrich_pending()
+    if result.enrich is not None:
+        e = result.enrich
         print("enrich:   %d/%d classified in %d batch(es), $%.6f"
-              % (result.updated, result.considered, result.batches,
-                 result.cost_usd))
-        if result.stopped_reason:
-            print("          stopped early: %s" % result.stopped_reason[:90])
+              % (e.updated, e.considered, e.batches, e.cost_usd))
+        if e.stopped_reason:
+            print("          stopped early: %s" % e.stopped_reason[:90])
+        print("dedupe:   %d further duplicates merged by company (free)"
+              % result.merged)
 
-        # Second dedupe pass, now that companies are known. Free.
-        from .dedupe import dedupe_by_company
-        with session_scope() as s:
-            merged = dedupe_by_company(s)
-        print("dedupe:   %d further duplicates merged by company (free)" % merged)
+    if result.chunks_synced:
+        print("chunks:   %d citation passages brought up to date (free)"
+              % result.chunks_synced)
 
-    return 1 if any(r.error for r in runs) else 0
+    return 1 if result.failed else 0
 
 
 if __name__ == "__main__":

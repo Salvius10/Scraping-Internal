@@ -90,14 +90,22 @@ def fetch_feed(source: Source, client: httpx.Client | None = None) -> list[FeedI
     try:
         resp = client.get(source.feed_url)
         resp.raise_for_status()
-        parsed = feedparser.parse(resp.content)
     finally:
         if owns_client:
             client.close()
 
+    items = parse_feed(resp.content, source.name)
+    log.info("%s: %d items from %s", source.name, len(items), source.feed_url)
+    return items
+
+
+def parse_feed(content: bytes | str, source_name: str) -> list[FeedItem]:
+    """Normalise raw RSS/Atom into FeedItems. Shared with live search."""
+    parsed = feedparser.parse(content)
+
     if parsed.bozo and not parsed.entries:
         raise ValueError(
-            f"{source.name}: unparseable feed ({parsed.get('bozo_exception')})"
+            f"{source_name}: unparseable feed ({parsed.get('bozo_exception')})"
         )
 
     items: list[FeedItem] = []
@@ -121,9 +129,7 @@ def fetch_feed(source: Source, client: httpx.Client | None = None) -> list[FeedI
             headline=headline,
             description=desc,
             published_at=_parse_date(entry),
-            source=source.name,
+            source=source_name,
             feed_categories=cats,
         ))
-
-    log.info("%s: %d items from %s", source.name, len(items), source.feed_url)
     return items

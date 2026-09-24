@@ -17,6 +17,8 @@ sys.path.insert(0, str(BACKEND))
 _TMP_DB = Path(tempfile.gettempdir()) / "isn_test_news.db"
 os.environ["DB_PATH"] = str(_TMP_DB)
 os.environ["LLM_DRY_RUN"] = "false"
+# Starting the app in a test must never kick off a real, paid ingest.
+os.environ["SCHEDULER_ENABLED"] = "false"
 
 import pytest  # noqa: E402
 

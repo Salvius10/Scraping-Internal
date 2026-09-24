@@ -120,14 +120,21 @@ def get_article(
 def activity(
     session: Session = Depends(get_session),
     days: int | None = Query(None, ge=1, le=365),
+    tz_offset: int = Query(0, ge=-720, le=840,
+                           description="reader's UTC offset in minutes"),
 ) -> dict:
-    """Stories per day across the window, for the masthead activity bar."""
+    """Stories per day across the window, for the masthead activity bar.
+
+    Days are the *reader's* days. Timestamps are stored in UTC, so without the
+    offset a story published at 02:00 IST was counted on the previous day's
+    bar while the tape below grouped it under the right one.
+    """
     window_days = days or settings.recency_window_days
     since = utcnow() - timedelta(days=window_days)
 
     rows = session.execute(
         select(
-            func.date(Article.published_at).label("day"),
+            func.date(Article.published_at, f"{tz_offset:+d} minutes").label("day"),
             func.count(Article.id),
         )
         .where(

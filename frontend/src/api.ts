@@ -38,6 +38,7 @@ export interface Status {
   last_refresh: string | null;
   hours_since_refresh: number | null;
   refresh_interval_hours: number;
+  next_refresh: string | null;
   article_count: number;
   newest_published: string | null;
   recency_window_days: number;
@@ -80,6 +81,70 @@ export interface ChatRequest {
   premium?: boolean;
 }
 
+export interface Citation {
+  n: number;
+  article_id: number;
+  chunk_id: number | null;
+  headline: string;
+  url: string;
+  source: string;
+  published_at: string | null;
+  company: string | null;
+  category: Category | null;
+  snippet: string;
+  cited: boolean;
+  discovered: boolean;
+}
+
+export interface SourceStatus {
+  name: string;
+  label: string;
+  kind: string;
+  status: "ok" | "empty" | "timeout" | "error" | "skipped";
+  found: number;
+  new: number;
+  cached: boolean;
+  error: string | null;
+}
+
+export interface IntelligenceResponse {
+  question: string;
+  answer: string | null;
+  model: string | null;
+  search: string | null;
+  terms: string[];
+  since_days: number | null;
+  citations: Citation[];
+  sources: SourceStatus[];
+  cost_usd: number;
+  plan_cached: boolean;
+  error: string | null;
+  budget_remaining: number;
+}
+
+export interface IntelligenceRequest {
+  question: string;
+  premium?: boolean;
+  live?: boolean;
+}
+
+export interface ExtractResponse {
+  url: string;
+  final_url: string | null;
+  prompt: string;
+  result: unknown;
+  rows: Record<string, unknown>[] | null;
+  cost_usd: number;
+  calls: number;
+  page_chars: number;
+  truncated: boolean;
+  cached: boolean;
+  seconds: number;
+  notes: string[];
+  error: string | null;
+  budget_remaining: number;
+}
+
 export interface FeedQuery {
   limit?: number;
   offset?: number;
@@ -120,10 +185,17 @@ async function post<T>(path: string, body: unknown): Promise<T> {
 export const api = {
   articles: (query: FeedQuery) => get<FeedPage>("/articles", { ...query }),
   facets: () => get<Facets>("/facets"),
-  activity: () => get<{ days: ActivityDay[] }>("/activity"),
+  // Days are bucketed in the reader's timezone, matching the tape below.
+  activity: () => get<{ days: ActivityDay[] }>("/activity", {
+    tz_offset: -new Date().getTimezoneOffset(),
+  }),
   status: () => get<Status>("/status"),
   filter: (phrase: string) => post<FilterResponse>("/filter", { phrase }),
   chat: (request: ChatRequest) => post<ChatResponse>("/chat", request),
+  intelligence: (request: IntelligenceRequest) =>
+    post<IntelligenceResponse>("/intelligence", request),
+  extract: (url: string, prompt: string) =>
+    post<ExtractResponse>("/extract", { url, prompt }),
 };
 
 /* Four categories families, one per brand colour. A reader scanning deal flow
@@ -153,20 +225,21 @@ export function categoryColor(category: string | null): string {
 /** Colour for a category rendered as *text*.
  *
  * #dbeaff is a surface tone, not a text tone -- it is invisible on white. The
- * quiet family therefore borrows the ink, while capital, ownership and risk
- * keep their own colour because all three read clearly at label size.
+ * quiet family therefore borrows the ink (mid, not soft: the label is the
+ * story's attribution and must hold up next to the headline), while capital,
+ * ownership and risk keep their own colour.
  */
 export function categoryTextColor(category: string | null): string {
   const isQuiet = CATEGORY_VAR[category ?? "Other"] === "--cat-quiet";
-  return isQuiet ? "var(--ink-soft)" : categoryColor(category);
+  return isQuiet ? "var(--ink-mid)" : categoryColor(category);
 }
 
 /** Parse a timestamp from the API as UTC.
  *
- * The API sends naive ISO strings ("2026-09-23T07:56:38") whose values are
- * UTC. JavaScript parses an offset-less date-time as *local* time, so in
- * India every article read 5h30m earlier than it was published. Adding the
- * missing designator when there is none fixes it without touching the API.
+ * The API now sends an explicit offset ("2026-09-23T07:56:38Z"), fixed at the
+ * ORM layer. It used to send naive strings, which JavaScript parses as
+ * *local* time -- every article read 5h30m early in India -- so a missing
+ * designator is still treated as UTC rather than trusted to be local.
  */
 export function parseTime(iso: string): Date {
   const hasZone = /[zZ]$|[+-]\d{2}:?\d{2}$/.test(iso);

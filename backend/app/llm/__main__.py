@@ -26,34 +26,6 @@ REQUIRED_MODELS = (
 )
 
 
-def untracked_note() -> str:
-    """Warn about spend the ledger cannot see.
-
-    ScrapeGraphAI calls Bedrock through its own LangChain client, so scraped
-    sources never reach `record_call`. Saying so keeps the headline figure
-    from reading as the whole truth.
-    """
-    try:
-        from ..ingest.scraper_sgai import estimate_run_cost
-        from ..ingest.sources import scrape_sources
-        paid = scrape_sources()
-    except Exception:  # noqa: BLE001 - reporting must not fail
-        return ""
-    if not paid:
-        return ""
-    per_run = estimate_run_cost()
-    names = ", ".join(s.name for s in paid)
-    lines = [
-        "",
-        "  NOT INCLUDED ABOVE: %s scraped via ScrapeGraphAI, which calls" % names,
-        "  Bedrock directly and bypasses this ledger. Estimated ~$%.5f per"
-        % per_run,
-        "  source per run (~$%.2f/month at 2 runs/day)."
-        % (per_run * len(paid) * 2 * 30),
-    ]
-    return "\n".join(lines)
-
-
 def preflight() -> int:
     """Check identity and model access without invoking a model."""
     print("AWS identity")
@@ -137,7 +109,6 @@ def main(argv: list[str] | None = None) -> int:
         return preflight()
 
     print(format_report())
-    print(untracked_note())
     if args.check and get_spend().exhausted:
         return 1
     return 0

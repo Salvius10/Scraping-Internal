@@ -25,6 +25,14 @@ class Settings(BaseSettings):
     dedupe_window_hours: int = 72     # how far back to look for the same story
     dedupe_threshold: float = 0.60    # Jaccard over title tokens
 
+    # Run the 12h refresh inside the API process. Turn off when ingest is run
+    # by `python -m app.scheduler` or by hand, so two processes do not race.
+    scheduler_enabled: bool = True
+
+    # --- Intelligence (real-time search of our own six sources) ---
+    live_search_timeout: float = 8.0  # per source; a slow site is dropped
+    live_search_ttl: int = 600        # seconds a live result is reused
+
     # --- HTTP ---
     user_agent: str = (
         "IndiaStartupNewsBot/0.1 (+aggregator; contact: melvinsalvius@gmail.com)"

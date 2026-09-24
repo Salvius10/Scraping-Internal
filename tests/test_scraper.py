@@ -115,3 +115,61 @@ def test_salvage_ignores_braces_inside_strings() -> None:
 def test_truncated_array_routed_through_coerce_rows() -> None:
     truncated = '[{"headline": "A", "url": "/a"}, {"headline": "B", "url": "/b"}, {"headl'
     assert len(_coerce_rows(FakeMessage(truncated))) == 2
+
+
+# --- Budget rails -------------------------------------------------------------
+# ScrapeGraphAI drives its own chat model, so it never goes through invoke().
+# These pin that its calls are still cap-checked and ledgered.
+
+def _chat_result(content, input_tokens: int, output_tokens: int):
+    from langchain_core.messages import AIMessage
+    from langchain_core.outputs import ChatGeneration, ChatResult
+
+    return ChatResult(generations=[ChatGeneration(message=AIMessage(
+        content=content,
+        usage_metadata={"input_tokens": input_tokens,
+                        "output_tokens": output_tokens,
+                        "total_tokens": input_tokens + output_tokens},
+    ))])
+
+
+def test_scrape_calls_are_ledgered_at_real_cost(clean_ledger) -> None:
+    import pytest
+
+    from app.config import settings
+    from app.ingest.scraper_sgai import FEATURE, _finish
+    from app.llm.budget import cost_of, spend_by_feature
+
+    result, _cost = _finish(_chat_result(
+        [{"type": "reasoning_content", "reasoning_content": {"text": "hm"}},
+         {"type": "text", "text": ARTICLE_JSON}],
+        input_tokens=15_000, output_tokens=900,
+    ))
+
+    assert result.generations[0].message.content == ARTICLE_JSON  # still flattened
+    [(feature, calls, cost)] = spend_by_feature()
+    assert (feature, calls) == (FEATURE, 1)
+    assert cost == pytest.approx(cost_of(settings.model_cheap, 15_000, 900))
+
+
+def test_scrape_call_is_refused_before_it_is_sent(clean_ledger) -> None:
+    import pytest
+
+    from app.config import settings
+    from app.ingest.scraper_sgai import _check_budget
+    from app.llm.budget import BudgetExceeded, record_call
+
+    tokens_out = int(settings.total_usd_cap * 1.05
+                     / settings.price_premium_out * 1_000_000) + 1
+    record_call("test", settings.model_premium, 0, tokens_out)
+
+    with pytest.raises(BudgetExceeded):
+        _check_budget([FakeMessage("a listing page " * 1000)])
+
+
+def test_failed_scrape_call_is_ledgered(clean_ledger) -> None:
+    from app.ingest.scraper_sgai import _ledger_failure
+    from app.llm.budget import spend_by_feature
+
+    _ledger_failure(RuntimeError("ThrottlingException"))
+    assert spend_by_feature()[0][:2] == ("scrape", 1)

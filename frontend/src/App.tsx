@@ -1,4 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import CopyLink from "./CopyLink";
+import ExtractPanel from "./ExtractPanel";
+import Intelligence from "./Intelligence";
 import Sidebar from "./Sidebar";
 import {
   api, categoryColor, categoryTextColor, parseTime, sourceLabel,
@@ -32,28 +35,52 @@ function describeAge(hours: number | null, interval: number): string {
   return `Refreshed ${days} day${days > 1 ? "s" : ""} ago — expected every ${interval}h`;
 }
 
+type View = "feed" | "intelligence";
+
+function viewFromHash(): View {
+  return window.location.hash === "#intelligence" ? "intelligence" : "feed";
+}
+
 /* ── Masthead ──────────────────────────────────────────────────────────── */
 
 function Masthead({
-  status, activity, activeDay, onPickDay,
+  status, activity, activeDay, onPickDay, view, onView,
 }: {
   status: Status | null;
   activity: ActivityDay[];
   activeDay: string | null;
   onPickDay: (date: string | null) => void;
+  view: View;
+  onView: (view: View) => void;
 }) {
   const peak = Math.max(1, ...activity.map((d) => d.count));
   const stale =
     status?.hours_since_refresh != null &&
     status.hours_since_refresh > status.refresh_interval_hours;
+  const next = status?.next_refresh
+    ? `Next refresh ${timeFmt.format(parseTime(status.next_refresh))} IST`
+    : undefined;
 
   return (
     <header className="masthead">
-      <h1 className="wordmark">
-        Dealflow <span>India startup ecosystem</span>
-      </h1>
+      <div className="masthead-left">
+        <h1 className="wordmark">
+          Dealflow <span>India startup ecosystem</span>
+        </h1>
+        <nav className="views" aria-label="Sections">
+          <button aria-current={view === "feed" ? "page" : undefined} onClick={() => onView("feed")}>
+            News feed
+          </button>
+          <button
+            aria-current={view === "intelligence" ? "page" : undefined}
+            onClick={() => onView("intelligence")}
+          >
+            Intelligence
+          </button>
+        </nav>
+      </div>
 
-      {activity.length > 0 && (
+      {view === "feed" && activity.length > 0 && (
         <div className="activity" role="group" aria-label="Stories per day">
           {activity.map((day) => {
             const active = activeDay === day.date;
@@ -78,7 +105,7 @@ function Masthead({
         </div>
       )}
 
-      <div className="freshness" data-stale={stale}>
+      <div className="freshness" data-stale={stale} title={next}>
         <span className="pulse" />
         {status
           ? `${describeAge(status.hours_since_refresh, status.refresh_interval_hours)} · ${status.article_count} stories`
@@ -168,8 +195,18 @@ function Entry({
       </div>
       <div className="entry-rule" style={{ background: hue }} />
       <div className="entry-body">
-        <div className={`entry-company${article.company ? "" : " anon"}`}>
-          {article.company ?? "Ecosystem"}
+        {/* Where it was reported -- the attribution sits with the story. */}
+        <div className="entry-kicker">
+          <span className="entry-source">{sourceLabel(article.source)}</span>
+          {others > 0 && (
+            <span
+              className="corroboration"
+              title={`Also reported by ${article.also_reported_by.map(sourceLabel).join(", ")}`}
+            >
+              +{others} {others === 1 ? "outlet" : "outlets"}
+            </span>
+          )}
+          <CopyLink url={article.url} />
         </div>
         <a
           className="entry-headline"
@@ -188,15 +225,6 @@ function Entry({
         >
           {article.category ?? "Other"}
         </span>
-        <span className="entry-source">{sourceLabel(article.source)}</span>
-        {others > 0 && (
-          <span
-            className="corroboration"
-            title={`Also reported by ${article.also_reported_by.map(sourceLabel).join(", ")}`}
-          >
-            +{others} {others === 1 ? "outlet" : "outlets"}
-          </span>
-        )}
         <button className="entry-ask" onClick={() => onSelect(article)}>
           Explain
         </button>
@@ -226,10 +254,26 @@ export default function App() {
   const [company, setCompany] = useState<string | undefined>(undefined);
   const [days, setDays] = useState<number | undefined>(undefined);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [extractOpen, setExtractOpen] = useState(false);
   const [selected, setSelected] = useState<Article | null>(null);
   const [filterNote, setFilterNote] = useState<string | null>(null);
+  const [view, setView] = useState<View>(viewFromHash);
 
   const offsetRef = useRef(0);
+
+  // The section lives in the URL hash so a reload or a shared link keeps it.
+  useEffect(() => {
+    const onHash = () => setView(viewFromHash());
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+
+  const showView = (next: View) => {
+    if (next === viewFromHash()) return;
+    if (next === "intelligence") window.location.hash = "intelligence";
+    else window.history.pushState(null, "", window.location.pathname + window.location.search);
+    setView(next);
+  };
 
   useEffect(() => {
     api.status().then(setStatus).catch(() => undefined);
@@ -324,6 +368,22 @@ export default function App() {
   const toggle = <T,>(list: T[], value: T) =>
     list.includes(value) ? list.filter((v) => v !== value) : [...list, value];
 
+  if (view === "intelligence") {
+    return (
+      <div className="shell" data-view="intelligence">
+        <Masthead
+          status={status}
+          activity={activity}
+          activeDay={activeDay}
+          onPickDay={setActiveDay}
+          view={view}
+          onView={showView}
+        />
+        <Intelligence />
+      </div>
+    );
+  }
+
   return (
     <div className="shell" data-sidebar={sidebarOpen ? "open" : "closed"}>
       <Masthead
@@ -331,6 +391,8 @@ export default function App() {
         activity={activity}
         activeDay={activeDay}
         onPickDay={setActiveDay}
+        view={view}
+        onView={showView}
       />
 
       <Rail
@@ -354,11 +416,23 @@ export default function App() {
           />
           <button
             className="ask-toggle"
+            aria-pressed={extractOpen}
+            onClick={() => setExtractOpen((open) => !open)}
+          >
+            Extract from a URL
+          </button>
+          <button
+            className="ask-toggle"
             aria-pressed={sidebarOpen}
             onClick={() => setSidebarOpen((open) => !open)}
           >
             {sidebarOpen ? "Hide assistant" : "Ask"}
           </button>
+        </div>
+
+        {/* Kept mounted while hidden so results survive closing the panel. */}
+        <div hidden={!extractOpen}>
+          <ExtractPanel onClose={() => setExtractOpen(false)} />
         </div>
 
         {filterNote && (

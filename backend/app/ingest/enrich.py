@@ -23,6 +23,7 @@ from ..db import session_scope
 from ..llm.bedrock import LlmUnavailable, invoke_json
 from ..llm.budget import BudgetExceeded
 from ..models import Article, Category, DescriptionOrigin, utcnow
+from .chunks import sync_chunk
 from .describe import MIN_DESCRIPTION_CHARS
 
 log = logging.getLogger(__name__)
@@ -154,6 +155,7 @@ def _apply_batch(entries: list[dict], by_number: dict[int, _Pending]) -> int:
                 if thin:
                     article.description = article.summary
                     article.description_origin = DescriptionOrigin.GENERATED
+                    sync_chunk(s, article)
 
             article.enriched_at = utcnow()
             updated += 1

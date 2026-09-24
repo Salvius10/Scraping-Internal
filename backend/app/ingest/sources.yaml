@@ -6,9 +6,14 @@
 #   scrape -> costs ~$0.0024/run. ScrapeGraphAI extracts the listing page.
 #
 # live_search: how the Intelligence section reaches this source in real time.
-#   search_feed -> free, targeted RSS of search results. Best case.
-#   feed_refetch-> free, but only returns whatever is newest (not query-aware).
-#   search_html -> needs parsing; only fired when free paths return too little.
+# All three kinds are free -- no model call. Placeholders: {q} is the
+# URL-encoded query, {slug} the query as a hyphenated tag slug.
+#   search_feed -> targeted RSS of search results. Best case.
+#   feed_refetch-> re-pull the feed and keep items matching the question.
+#   search_html -> the site's own search page, parsed as result cards.
+#
+# Live-search URLs re-verified on 2026-09-24 against each site's robots.txt
+# (Python's robotparser ignores wildcards, so these were read by hand).
 
 sources:
   - name: indianstartupnews
@@ -18,8 +23,8 @@ sources:
     feed_url: https://indianstartupnews.com/rss
     feed_depth: 50          # items returned -- deep enough for 12h cadence
     live_search:
-      kind: search_html
-      url: "https://indianstartupnews.com/search?q={q}"
+      kind: search_html   # server-rendered; ?q= 404s, the form field is title
+      url: "https://indianstartupnews.com/search?title={q}"
 
   - name: entrackr
     label: Entrackr
@@ -28,8 +33,8 @@ sources:
     feed_url: https://entrackr.com/rss
     feed_depth: 50
     live_search:
-      kind: search_html
-      url: "https://entrackr.com/?s={q}"
+      kind: search_html   # same CMS as Indian Startup News; ?s= is ignored
+      url: "https://entrackr.com/search?title={q}"
 
   - name: inc42
     label: Inc42
@@ -38,8 +43,10 @@ sources:
     feed_url: https://inc42.com/feed/
     feed_depth: 24
     live_search:
-      kind: search_feed   # VERIFIED: returns a real filtered RSS. Free + live.
-      url: "https://inc42.com/?s={q}&feed=rss2"
+      # ?s={q}&feed=rss2 does return a filtered feed, but robots.txt has
+      # "Disallow: /*?*" for every agent, so we re-pull the main feed instead.
+      kind: feed_refetch
+      url: https://inc42.com/feed/
 
   - name: yourstory
     label: YourStory
@@ -48,7 +55,7 @@ sources:
     feed_url: https://yourstory.com/feed
     feed_depth: 20
     live_search:
-      kind: feed_refetch  # not classic WordPress; ?s= is ignored
+      kind: feed_refetch  # ?s= is ignored, and robots.txt disallows /search
       url: https://yourstory.com/feed
 
   - name: sujatachronicle
@@ -67,8 +74,10 @@ sources:
     strategy: scrape      # the ONLY paid source. No RSS exists anywhere.
     listing_url: https://www.vccircle.com/
     live_search:
+      # /search is rendered client-side (the HTML carries no results), but
+      # tag pages are server-rendered and exist for most companies.
       kind: search_html
-      url: "https://www.vccircle.com/search?q={q}"
+      url: "https://www.vccircle.com/tag/{slug}"
 
 # --- Excluded, with reasons -------------------------------------------------
 excluded:

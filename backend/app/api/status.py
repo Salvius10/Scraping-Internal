@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from .. import scheduler
 from ..config import settings
 from ..db import get_session
 from ..ingest.sources import load_sources
@@ -25,9 +26,6 @@ def status(session: Session = Depends(get_session)) -> StatusOut:
     last_refresh = session.scalar(select(func.max(IngestRun.started_at)))
     hours_since = None
     if last_refresh is not None:
-        if last_refresh.tzinfo is None:
-            from datetime import timezone
-            last_refresh = last_refresh.replace(tzinfo=timezone.utc)
         hours_since = round(
             (utcnow() - last_refresh).total_seconds() / 3600.0, 1
         )
@@ -57,6 +55,7 @@ def status(session: Session = Depends(get_session)) -> StatusOut:
         last_refresh=last_refresh,
         hours_since_refresh=hours_since,
         refresh_interval_hours=settings.refresh_hours,
+        next_refresh=scheduler.next_run_time(),
         article_count=session.scalar(
             select(func.count(Article.id)).where(Article.canonical_id.is_(None))
         ) or 0,

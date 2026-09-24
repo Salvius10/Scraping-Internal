@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 from ..config import settings
 from ..db import session_scope
 from ..models import Article, DescriptionOrigin
+from .chunks import sync_chunk
 
 log = logging.getLogger(__name__)
 
@@ -159,6 +160,7 @@ def describe_pending(limit: int | None = None, session: Session | None = None) -
                 ):
                     article.description = meta.description
                     article.description_origin = DescriptionOrigin.META
+                    sync_chunk(s, article)
                     changed = True
 
                 if article.published_at is None and meta.published_at:

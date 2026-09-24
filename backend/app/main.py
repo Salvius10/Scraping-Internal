@@ -16,7 +16,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from .api import chat, feed, filter as filter_api, status
+from . import scheduler
+from .api import chat, extract, feed, filter as filter_api, intelligence, status
 from .config import BACKEND_DIR, settings
 from .db import init_db
 
@@ -41,6 +42,8 @@ app.include_router(feed.router)
 app.include_router(status.router)
 app.include_router(filter_api.router)
 app.include_router(chat.router)
+app.include_router(intelligence.router)
+app.include_router(extract.router)
 
 
 @app.on_event("startup")
@@ -50,6 +53,14 @@ def _startup() -> None:
         "ready: db=%s region=%s cheap=%s",
         settings.db_path.name, settings.aws_region, settings.model_cheap,
     )
+    # The 12h refresh. Off in tests, and when ingest runs in its own process.
+    if settings.scheduler_enabled:
+        scheduler.start()
+
+
+@app.on_event("shutdown")
+def _shutdown() -> None:
+    scheduler.shutdown()
 
 
 @app.get("/api/health")

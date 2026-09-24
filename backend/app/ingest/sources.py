@@ -17,16 +17,19 @@ class LiveSearch:
 
     kind:
       search_feed  -- free, targeted RSS of search results (best case)
-      feed_refetch -- free, but returns newest items rather than query matches
-      search_html  -- needs parsing; only fired when free paths fall short
+      feed_refetch -- free, newest items, filtered to the question locally
+      search_html  -- free, the site's own search page parsed as result cards
     """
 
     kind: str
     url: str
 
     def build(self, query: str) -> str:
+        """Fill {q} (URL-encoded) and {slug} (tag-style) placeholders."""
+        import re
         from urllib.parse import quote_plus
-        return self.url.replace("{q}", quote_plus(query))
+        slug = re.sub(r"[^a-z0-9]+", "-", query.lower()).strip("-")
+        return self.url.replace("{q}", quote_plus(query)).replace("{slug}", slug)
 
 
 @dataclass(frozen=True)

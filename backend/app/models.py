@@ -15,10 +15,42 @@ from sqlalchemy import (
     DateTime, Enum, Float, ForeignKey, Index, Integer, String, Text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.types import TypeDecorator
 
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+class UTCDateTime(TypeDecorator):
+    """A DateTime that is always timezone-aware UTC on the Python side.
+
+    SQLite has no timezone type: it stores the wall-clock digits and drops the
+    offset, so every value read back used to be naive. The API serialised
+    those as "2026-09-23T07:56:38" and browsers parsed them as *local* time --
+    5h30m early in India. Normalising here fixes it for every column, every
+    endpoint and every comparison at once.
+
+    Storage is unchanged (naive UTC digits), so existing rows need no migration.
+    """
+
+    impl = DateTime
+    cache_ok = True
+
+    def process_bind_param(self, value, dialect):
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            # Naive values in this codebase are UTC by convention.
+            return value
+        return value.astimezone(timezone.utc).replace(tzinfo=None)
+
+    def process_result_value(self, value, dialect):
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
 
 
 class Base(DeclarativeBase):
@@ -65,7 +97,7 @@ class Article(Base):
         Enum(DescriptionOrigin), default=None
     )
     published_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), index=True, default=None
+        UTCDateTime(), index=True, default=None
     )
 
     # Filled by the batched gpt-oss enrichment pass (Phase 5).
@@ -83,10 +115,10 @@ class Article(Base):
 
     content_hash: Mapped[str | None] = mapped_column(String(40), default=None)
     ingested_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow
+        UTCDateTime(), default=utcnow
     )
     enriched_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), default=None
+        UTCDateTime(), default=None
     )
 
     chunks: Mapped[list["Chunk"]] = relationship(
@@ -126,7 +158,7 @@ class LlmCall(Base):
     __tablename__ = "llm_calls"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow,
+    ts: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow,
                                          index=True)
     feature: Mapped[str] = mapped_column(String(60), index=True)
     model: Mapped[str] = mapped_column(String(120))
@@ -149,10 +181,10 @@ class IngestRun(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     source: Mapped[str] = mapped_column(String(60), index=True)
     started_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow, index=True
+        UTCDateTime(), default=utcnow, index=True
     )
     finished_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), default=None
+        UTCDateTime(), default=None
     )
     strategy: Mapped[str] = mapped_column(String(20), default="rss")
     items_seen: Mapped[int] = mapped_column(Integer, default=0)
@@ -163,6 +195,20 @@ class IngestRun(Base):
     @property
     def window_overflowed(self) -> bool:
         return self.items_seen > 0 and self.items_new == self.items_seen
+
+
+class QuestionCache(Base):
+    """Intelligence question -> compiled search plan (site query + FTS terms).
+
+    Like FilterCache: a question asked twice is only ever paid for once.
+    """
+
+    __tablename__ = "question_cache"
+
+    question_hash: Mapped[str] = mapped_column(String(40), primary_key=True)
+    question: Mapped[str] = mapped_column(Text)
+    plan_json: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
 
 
 class FilterCache(Base):
@@ -177,5 +223,5 @@ class FilterCache(Base):
     phrase: Mapped[str] = mapped_column(Text)
     filter_json: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=utcnow
+        UTCDateTime(), default=utcnow
     )

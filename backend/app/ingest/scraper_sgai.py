@@ -8,12 +8,12 @@ We scrape the *listing* page, not individual articles. One page already holds
 rather than the number of articles -- the difference between ~$0.15/month and
 something that grows every time a source gets busier.
 
-SPEND IS NOT LEDGERED HERE. ScrapeGraphAI builds its own LangChain client and
-calls Bedrock directly, so these calls bypass `app.llm.budget` entirely: they
-produce no ledger rows and no cap check. This was a deliberate choice; the
-consequence is that `python -m app.llm` under-reports total spend by whatever
-this module costs. `estimate_run_cost()` exists so the gap can at least be
-quantified rather than invisible.
+Spend here goes through the same rails as every other model call. ScrapeGraphAI
+drives its own LangChain chat model, so `invoke()` never sees these calls;
+instead the chat model we hand it (`_FlatChatBedrockConverse`) checks the cap
+before each Bedrock call and ledgers the real token usage after it, under the
+feature name "scrape". A refused call falls back to free anchor parsing, so a
+spent budget costs the source its model extraction, never the source itself.
 """
 
 from __future__ import annotations
@@ -26,6 +26,9 @@ from urllib.parse import urljoin, urlparse
 from langchain_aws import ChatBedrockConverse
 
 from ..config import settings
+from ..llm.budget import (
+    BudgetExceeded, ensure_budget, estimate_cost, record_call,
+)
 from .rss import FeedItem, clean_text
 from .sources import Source
 
@@ -49,6 +52,9 @@ MODEL_TOKENS = 128_000
 # are billed and counted as output on this model.
 MAX_OUTPUT_TOKENS = 8_000
 
+# Ledger label for every ScrapeGraphAI call.
+FEATURE = "scrape"
+
 
 def _flatten_content(content: object) -> object:
     """Reduce a Converse content-block list to the plain answer text.
@@ -67,27 +73,109 @@ def _flatten_content(content: object) -> object:
     )
 
 
+def _check_budget(messages: object) -> None:
+    """Refuse the call before it is made if it could breach a cap.
+
+    Same pessimistic estimate `invoke()` uses: input at 4 chars per token,
+    output assumed to hit the ceiling in full.
+    """
+    chars = sum(len(str(getattr(m, "content", m))) for m in (messages or []))
+    ensure_budget(estimate_cost(settings.model_cheap, chars, MAX_OUTPUT_TOKENS))
+
+
+def _usage(message: object) -> tuple[int, int]:
+    """(input, output) tokens from a LangChain message, 0 when absent."""
+    meta = getattr(message, "usage_metadata", None) or {}
+    tokens_in = int(meta.get("input_tokens") or 0)
+    tokens_out = int(meta.get("output_tokens") or 0)
+    if not (tokens_in or tokens_out):
+        raw = (getattr(message, "response_metadata", None) or {}).get("usage") or {}
+        tokens_in = int(raw.get("inputTokens") or 0)
+        tokens_out = int(raw.get("outputTokens") or 0)
+    return tokens_in, tokens_out
+
+
+def _ledger(result, feature: str = FEATURE) -> float:
+    """Record the real token usage of one chat result. Returns its cost."""
+    tokens_in = tokens_out = 0
+    for generation in result.generations:
+        i, o = _usage(generation.message)
+        tokens_in += i
+        tokens_out += o
+    note = None if (tokens_in or tokens_out) else "no usage reported"
+    return record_call(feature, settings.model_cheap, tokens_in, tokens_out,
+                       ok=True, note=note)
+
+
+def _ledger_failure(exc: Exception, feature: str = FEATURE) -> None:
+    record_call(feature, settings.model_cheap, 0, 0, ok=False,
+                note=f"{type(exc).__name__}: {exc}"[:500])
+
+
+def _finish(result, feature: str = FEATURE) -> tuple[object, float]:
+    """Ledger a result and flatten it for ScrapeGraphAI. Returns (result, cost)."""
+    cost = _ledger(result, feature)
+    for generation in result.generations:
+        generation.message.content = _flatten_content(generation.message.content)
+    return result, cost
+
+
 class _FlatChatBedrockConverse(ChatBedrockConverse):
-    """ChatBedrockConverse that hands downstream code a plain string."""
+    """ChatBedrockConverse that is metered and hands back a plain string.
 
-    def _generate(self, *args, **kwargs):
-        result = super()._generate(*args, **kwargs)
-        for generation in result.generations:
-            generation.message.content = _flatten_content(
-                generation.message.content
-            )
+    Every call is cap-checked before it is sent and ledgered afterwards, which
+    keeps ScrapeGraphAI inside the same $7 rails as `invoke()`. Each instance
+    also totals its own spend, so a caller can report what one run cost.
+    """
+
+    ledger_feature: str = FEATURE
+    spent_usd: float = 0.0
+    calls: int = 0
+
+    def _generate(self, messages, *args, **kwargs):
+        _check_budget(messages)
+        try:
+            result = super()._generate(messages, *args, **kwargs)
+        except Exception as exc:
+            _ledger_failure(exc, self.ledger_feature)
+            raise
+        return self._tally(result)
+
+    async def _agenerate(self, messages, *args, **kwargs):
+        _check_budget(messages)
+        try:
+            result = await super()._agenerate(messages, *args, **kwargs)
+        except Exception as exc:
+            _ledger_failure(exc, self.ledger_feature)
+            raise
+        return self._tally(result)
+
+    def _tally(self, result):
+        result, cost = _finish(result, self.ledger_feature)
+        self.spent_usd += cost
+        self.calls += 1
         return result
 
-    async def _agenerate(self, *args, **kwargs):
-        result = await super()._agenerate(*args, **kwargs)
-        for generation in result.generations:
-            generation.message.content = _flatten_content(
-                generation.message.content
-            )
-        return result
+
+def make_llm(feature: str = FEATURE) -> _FlatChatBedrockConverse:
+    """The metered chat model ScrapeGraphAI runs on, ledgered under `feature`."""
+    from ..llm.bedrock import get_client
+
+    return _FlatChatBedrockConverse(
+        client=get_client(),
+        model=settings.model_cheap,
+        temperature=0.0,
+        # A listing page of 20+ articles needs room; the default cuts the JSON
+        # array off mid-object, wasting a whole extraction.
+        max_tokens=MAX_OUTPUT_TOKENS,
+        additional_model_request_fields={
+            "reasoning_effort": settings.reasoning_effort
+        },
+        ledger_feature=feature,
+    )
 
 
-def _graph_config() -> dict:
+def _graph_config(llm: _FlatChatBedrockConverse | None = None) -> dict:
     """Build the graph config around OUR Bedrock client.
 
     Letting ScrapeGraphAI construct the model itself (`"model": "bedrock/..."`)
@@ -101,19 +189,7 @@ def _graph_config() -> dict:
     therefore the Bedrock API key from .env, the Converse API (reasoning in its
     own block), and reasoning_effort, which is ~3x cheaper on output tokens.
     """
-    from ..llm.bedrock import get_client
-
-    llm = _FlatChatBedrockConverse(
-        client=get_client(),
-        model=settings.model_cheap,
-        temperature=0.0,
-        # A listing page of 20+ articles needs room; the default cuts the JSON
-        # array off mid-object, wasting a whole extraction.
-        max_tokens=MAX_OUTPUT_TOKENS,
-        additional_model_request_fields={
-            "reasoning_effort": settings.reasoning_effort
-        },
-    )
+    llm = llm or make_llm()
 
     return {
         "llm": {
@@ -278,6 +354,15 @@ def scrape_listing(source: Source, prompt: str = EXTRACTION_PROMPT) -> list[Feed
     if not url:
         raise ValueError(f"{source.name} has no listing_url")
 
+    # Refuse the whole run up front if it could breach a cap; the free anchor
+    # parser still recovers the listing.
+    try:
+        ensure_budget(estimate_run_cost())
+    except BudgetExceeded as exc:
+        log.warning("%s: %s -- using free anchor parsing instead",
+                    source.name, exc)
+        return fallback_anchors(source)
+
     from scrapegraphai.graphs import SmartScraperGraph
 
     graph = SmartScraperGraph(prompt=prompt, source=url, config=_graph_config())
@@ -287,7 +372,12 @@ def scrape_listing(source: Source, prompt: str = EXTRACTION_PROMPT) -> list[Feed
         log.error("%s: ScrapeGraphAI fell back to an 8192 token window -- the "
                   "listing page will be truncated", source.name)
 
-    raw = graph.run()
+    try:
+        raw = graph.run()
+    except BudgetExceeded as exc:
+        log.warning("%s: %s -- using free anchor parsing instead",
+                    source.name, exc)
+        return fallback_anchors(source)
     rows = _coerce_rows(raw)
     if not rows:
         log.warning("%s: extraction returned nothing usable (%r) -- "
@@ -386,10 +476,10 @@ def fallback_anchors(source: Source) -> list[FeedItem]:
 
 
 def estimate_run_cost(page_chars: int = 60_000, output_tokens: int = 1_500) -> float:
-    """Rough cost of one scrape, since the real figure is never ledgered.
+    """Rough cost of one scrape, used for the up-front cap check.
 
-    ScrapeGraphAI chunks the page and may make several calls, so treat this as
-    a floor rather than a precise number.
+    The real figure is ledgered per call. ScrapeGraphAI chunks the page and
+    may make several calls, so treat this as a floor rather than a ceiling.
     """
     tokens_in = page_chars // 4
     return (tokens_in * settings.price_cheap_in

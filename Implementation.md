@@ -7,8 +7,9 @@ filter and interrogate the feed in plain English.
 This document is the low-level design: what every module does, why it is shaped
 that way, and what the real data forced us to change.
 
-**Current state:** 236 articles ingested, 204 canonical after deduplication,
-121 tests passing, **$0.017285 of the $7.00 budget spent (0.2%)**.
+**Current state:** 267 articles ingested (236 by the pipeline, 31 written
+through by live Intelligence queries), 170 tests passing, **$0.018794 of the
+$7.00 budget spent (0.3%)**.
 
 ---
 
@@ -73,6 +74,11 @@ explicit, user-facing opt-in and nothing else.
 │ /api/status│              │  NL → SQL     │            │ explain·summarise│
 │ (free)     │              │  (gpt-oss)    │            │ (gpt-oss│Sonnet) │
 └─────┬──────┘              └───────┬───────┘            └────────┬────────┘
+      │               ┌─────────────▼──────────────┐              │
+      │               │  /api/intelligence         │              │
+      │               │  plan → live search (free) │              │
+      │               │  → FTS5 → cited answer     │              │
+      │               └─────────────┬──────────────┘              │
       │                             │                             │
       └─────────────────────────────┼─────────────────────────────┘
                                     │
@@ -82,6 +88,7 @@ explicit, user-facing opt-in and nothing else.
                         └────────────────────────┘
 
   Every paid call passes through llm/budget.py, which meters and can refuse it.
+  app/scheduler.py runs the pipeline every 12h, inside the API or standalone.
 ```
 
 **Layering rule:** `api` → `ingest`/`llm` → `db`/`models`. Nothing lower
@@ -193,6 +200,34 @@ Natural-language filtering, explain, and summarise. The filter compiles to SQL
 rather than reading articles, which is why it costs $0.00009 instead of scaling
 with the corpus.
 
+### Phase 8 — Closing the v1 gaps
+
+Five gaps were left after Phase 7. All are now closed:
+
+| Gap | Fix |
+|---|---|
+| No scheduler | `app/scheduler.py` (APScheduler). Runs inside the API process by default, or standalone. The cadence is anchored to the last recorded refresh, so a restart never triggers a paid run on a fresh feed |
+| Intelligence not built | `/api/intelligence`, `search/corpus.py`, `search/live.py`, and an Intelligence page in the frontend |
+| Chunks unused | Chunks are now the citation passages. They were also **stale**: 72 of 236 still held the feed description after `describe.py` had replaced it. `ingest/chunks.py` keeps them in sync |
+| VCCircle spend not in the ledger | Each ScrapeGraphAI call is now cap-checked and recorded under `scrape` |
+| API sent datetimes with no timezone | `UTCDateTime` in `models.py`; the activity bar now counts days in the reader's timezone |
+
+**What live verification changed:**
+
+- **Three of the recorded live-search URLs were wrong.** `indianstartupnews.com/search?q=`
+  and `vccircle.com/search?q=` return 404, and `entrackr.com/?s=` ignores the query. The
+  first two sites share a CMS whose search is `/search?title={q}`. VCCircle's
+  search is client-rendered, but its `/tag/{slug}` pages are server-rendered.
+- **Inc42's "verified" search feed is disallowed.** Its robots.txt has
+  `Disallow: /*?*` for every agent. Python's `robotparser` ignores wildcards, which is
+  how this was missed. Inc42 now re-fetches its main feed instead.
+- **gpt-oss cites as `【9】` or `【8†L1-L4】`** whatever the prompt asks, so no
+  citation was being matched. `normalise_citations()` rewrites them to `[n]`.
+- **Ranking needed the entity.** OR-ing the planned terms ("ipo, listing,
+  stock, market") ranked other companies' IPOs above Zepto's. Retrieval now
+  ranks stories in three tiers: the entity plus a term, then the entity alone,
+  then any term.
+
 ### Post-phase — UI and a timezone bug
 
 The UI was rebuilt on a four-colour brand palette, light-only. While verifying
@@ -212,6 +247,7 @@ backend/app/
 ├── db.py             105 lines   engine, pragmas, FTS5 index + triggers
 ├── schemas.py         80 lines   API response shapes
 ├── main.py                       FastAPI app, CORS, SPA static serving
+├── scheduler.py                  12h refresh (in-process or standalone)
 ├── llm/
 │   ├── budget.py     249 lines   spend ledger + cap enforcement
 │   ├── bedrock.py    335 lines   the only Bedrock client
@@ -222,14 +258,19 @@ backend/app/
 │   ├── rss.py        129 lines   feedparser adapter
 │   ├── scraper_sgai.py 396 lines ScrapeGraphAI + free anchor fallback
 │   ├── describe.py   177 lines   og:description + article:published_time
+│   ├── chunks.py                 citation passages kept in sync
 │   ├── dedupe.py     340 lines   two-pass deduplication
 │   ├── enrich.py     223 lines   batched classification
 │   └── pipeline.py   225 lines   orchestration + CLI
+├── search/
+│   ├── corpus.py                 FTS5 retrieval → citable evidence (free)
+│   └── live.py                   parallel live search of the six sites (free)
 └── api/
     ├── feed.py       167 lines   /articles /facets /activity
     ├── status.py      75 lines   /status
     ├── filter.py     212 lines   /filter  (NL → SQL)
-    └── chat.py       149 lines   /chat    (explain · summarise · ask)
+    ├── chat.py       149 lines   /chat    (explain · summarise · ask)
+    └── intelligence.py           /intelligence (cited Q&A, real-time)
 ```
 
 ### 4.1 `config.py`
@@ -487,10 +528,12 @@ zero articles until handled: a list; a dict wrapping a list; a dict wrapping an
 unparsed JSON *string*; a LangChain message; a truncated array with no closing
 bracket; and a bare `"NA"`. All are covered by `tests/test_scraper.py`.
 
-> **Spend here is not ledgered.** ScrapeGraphAI calls Bedrock through its own
-> LangChain client, bypassing `llm/budget.py`. This was a deliberate choice;
-> the consequence is that `python -m app.llm` under-reports total spend, and it
-> prints an explicit note saying so rather than implying $0.
+**Spend is ledgered here too.** ScrapeGraphAI drives its own LangChain chat
+model, so `invoke()` never sees these calls. Instead, `_FlatChatBedrockConverse`
+checks the cap before each call and records the real `usage_metadata` after it,
+under the feature `scrape`. Failed calls are recorded as well. If the cap refuses
+the run, the free `fallback_anchors()` path takes over, so a spent budget
+loses the model extraction but not the source.
 
 ### 4.9 `ingest/describe.py`
 
@@ -625,6 +668,60 @@ are dropped, and `since_days` outside 1–365 is discarded. `_describe()` echoes
 the filter back in plain language so the reader can see what was understood.
 Results are cached by `sha1(phrase.lower().strip())` in `FilterCache`, so the
 same phrase is **never recompiled**.
+
+#### `api/intelligence.py`
+
+`POST /api/intelligence {"question", "premium", "live"}`. It is real-time and never
+waits for the scheduler:
+
+```
+1. plan      gpt-oss → {search, terms, since_days}; cached per question
+             (QuestionCache); free keyword fallback when capped
+2. live      search/live.py: all six sites in parallel, 8s each, cached 10 min
+               search_html   Indian Startup News, Entrackr  /search?title={q}
+                             VCCircle                       /tag/{slug}
+               feed_refetch  Inc42, YourStory, Sujata Chronicle
+             results must name the searched entity; a slow site → "timeout"
+3. write     new finds get og:description (free) and go through store_item():
+             deduped, chunked and ready for the feed and later enrichment
+4. retrieve  search/corpus.py: FTS5 bm25 (headline 3, company 4), entity-first
+             tiers, 4 slots reserved for live finds, newest first
+5. answer    numbered passages → gpt-oss (Sonnet opt-in) → [n] citations
+```
+
+Each citation carries an `article_id` and a `chunk_id`, so every claim
+resolves to stored text. When the budget is exhausted the response still
+returns the matching stories and an `error`; only the prose is withheld.
+Measured on the first live run: **$0.000467** uncached, **$0.000325** with
+the plan cached, and about 7s with all six sites answering.
+
+#### `api/extract.py` + `extract.py` — extract from any URL
+
+`POST /api/extract {"url", "prompt"}`, surfaced on the main dashboard as
+**Extract from a URL**. The reader pastes any page and says in plain words
+what to pull out; ScrapeGraphAI returns it, as a table where the result is a
+list of records (with CSV/JSON download), otherwise as text or JSON.
+
+The URL is untrusted, so **our server fetches it, not ScrapeGraphAI**:
+
+| Guard | Why |
+|---|---|
+| http/https only, ports 80/443, no `user:pass@` | nothing but ordinary web pages |
+| every resolved IP must be public (`is_global`) | no localhost, private LAN, or the `169.254.169.254` cloud-metadata endpoint |
+| redirects followed by hand, each hop re-checked | a public page cannot bounce the server onto localhost |
+| 3 MB download cap, HTML/text content types only | no huge or binary downloads |
+
+ScrapeGraphAI is then handed the **HTML itself** as its source, so it parses
+locally and never makes a request of its own.
+
+Spend: scripts, styles, SVG and every attribute except `href/src/alt/title`
+are stripped (a 163 KB search page reached the model as ~10 K characters),
+and the cleaned page is capped at 120 K characters -- worst case about
+$0.01, typically well under $0.001 of input. Each call is cap-checked and
+ledgered under `extract`; the budget is checked before the first call;
+one extraction runs at a time; the same URL + request within an hour is
+served from cache at $0. Pages rendered entirely by JavaScript have no
+server-side text and are refused before any model call.
 
 #### `api/chat.py`
 
@@ -761,9 +858,12 @@ Sans, with tabular figures so times and amounts align.
 
 **Layout principles**, in order of how much they shape the page:
 
-1. **Company reads before headline.** This audience scans for *who*, which
-   inverts the usual news hierarchy. It is the most brief-specific choice in
-   the design.
+1. **The outlet sits above the headline, the category closes the row.** Each
+   story's kicker line is the outlet plus a copy-link button; the category has
+   a fixed-width column at the end so categories align down the page. (An
+   earlier version led with the extracted company name; it was removed at the
+   reader's request -- the company is still extracted and used by search,
+   filters and Intelligence.)
 2. **Category is a coloured rule, not a pill** — it is a filter dimension, so
    it earns structural encoding.
 3. **A time spine, not cards** — deal flow is chronological.
@@ -826,7 +926,18 @@ POST /api/filter {"phrase": "funding rounds this week"}
 The corpus is never sent to the model, which is why this stays cheap as the
 database grows.
 
-### 6.4 Sidebar answer
+### 6.4 Scheduled refresh
+
+```
+startup (SCHEDULER_ENABLED) → next_due(last IngestRun):
+    never run or overdue → now      fresh → last + 12h
+every 12h → refresh_job():
+    in-process lock held?           → skip (never overlap)
+    refreshed < 12h ago elsewhere?  → skip (never pay twice)
+    pipeline.refresh(): ingest → describe → enrich → dedupe → sync chunks
+```
+
+### 6.5 Sidebar answer
 
 ```
 POST /api/chat {"mode":"summarise","article_ids":[...],"premium":false}
@@ -853,8 +964,8 @@ chat_ask          1 call    $0.000187
                             $0.017285     of $7.00  (0.2%)
 ```
 
-Plus ~$0.003 per run of unledgered VCCircle scraping, which the report states
-explicitly rather than hiding.
+VCCircle scraping is now recorded under `scrape`. Intelligence spend is recorded
+under `intelligence_plan` and `intelligence`.
 
 ### Unit economics
 
@@ -893,20 +1004,26 @@ explicitly rather than hiding.
 
 ## 8. Testing
 
-**121 tests, all offline — no test spends money.**
+**202 tests, all offline — no test spends money.**
 
 | File | Tests | Covers |
 |---|---|---|
 | `test_budget.py` | 21 | Pricing arithmetic, both caps, rolling 24h window, ledger, and that `invoke` refuses **before building a client** when over budget |
-| `test_dedupe.py` | 18 | Every real headline pair that broke the matcher, kept as regressions |
-| `test_enrich.py` | 14 | Closed taxonomy, company cleaning, meta extraction, fixture validity |
-| `test_filter.py` | 14 | Untrusted model output, cache keys, plain-language echo |
-| `test_scraper.py` | 14 | Every ScrapeGraphAI response shape observed live |
+| `test_dedupe.py` | 27 | Every real headline pair that broke the matcher, kept as regressions |
+| `test_enrich.py` | 37 | Closed taxonomy, company cleaning, meta extraction, fixture validity |
+| `test_filter.py` | 22 | Untrusted model output, cache keys, plain-language echo |
+| `test_scraper.py` | 17 | Every ScrapeGraphAI response shape observed live; scrape calls cap-checked and ledgered |
+| `test_intelligence.py` | 30 | Untrusted plans, FTS5 injection, entity-first ranking, live-result parsing and relevance, one slow site never stalls, write-through, citation parsing incl. gpt-oss `【n】`, budget degradation |
+| `test_scheduler.py` | 10 | Restart does not re-run a fresh feed, runs never overlap, a failing run is survived |
+| `test_extract.py` | 32 | URL guard (private IPs, metadata endpoint, schemes, ports, redirect-to-localhost), size/type limits, HTML cleaning, result shapes, budget checked before any call, cache, one run at a time |
+| `test_storage.py` | 6 | Timestamps come back aware, API emits an offset, activity uses the reader's day, chunk sync |
 
 Two deliberate choices:
 
 - **`conftest.py` points at a throwaway database** before anything imports
-  settings, so tests can never touch the real ledger.
+  settings, so tests can never touch the real ledger. It also sets
+  `SCHEDULER_ENABLED=false`, so starting the app under test can never
+  trigger a paid ingest.
 - **Model quality is measured by a script, not a test.**
   `scripts/eval_enrich.py` makes real calls; a pytest that quietly spends money
   on every run is a bad idea on a $7 budget.
@@ -944,7 +1061,14 @@ Push-Location backend
 Pop-Location
 
 # serve the dashboard at http://127.0.0.1:8000
+# the 12h refresh runs inside it; an overdue feed refreshes on startup (paid)
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --port 8000 --app-dir backend
+
+# or: serve without the scheduler, and run the schedule in its own process
+$env:SCHEDULER_ENABLED = "false"
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --port 8000 --app-dir backend
+Push-Location backend; ..\.venv\Scripts\python.exe -m app.scheduler; Pop-Location
+..\.venv\Scripts\python.exe -m app.scheduler --status   # when it is next due (free)
 ```
 
 PowerShell has no `&&`; use `;`, or `--app-dir` as above to avoid `cd`
@@ -961,11 +1085,11 @@ Edit `backend/app/ingest/sources.yaml` — nothing else. Run
 
 | Gap | Impact | Notes |
 |---|---|---|
-| **No scheduler** | Ingest is run by hand with `--once` | APScheduler is in `requirements.txt`; wiring a 12-hour job is small |
-| **VCCircle spend unledgered** | `python -m app.llm` under-reports | Deliberate choice; the report prints the estimate explicitly |
 | **Valuation vs round size** | "Brahma AI at $2 bn valuation" and "raises $150M" read as conflicting figures and stay unmerged | Errs toward showing a duplicate rather than hiding a story — the right direction |
-| **API sends naive datetimes** | Fixed in the frontend with `parseTime()` | The proper fix is timezone-aware serialisation in `models.py` |
-| **Intelligence searches the corpus only** | No open-web search | Deliberate — avoids a search API and a credit card. `sources.yaml` already records a `live_search` strategy per source for when this is built |
+| **No open-web search** | Intelligence searches only the six sources | Deliberate. It avoids a search API and a credit card |
+| **VCCircle live search is tag-based** | Finds a company only if VCCircle has a tag page for it | Its `/search` page is rendered client-side, so there is nothing to parse without a headless browser |
+| **URL extraction cannot read JavaScript-only pages** | Single-page apps return an empty shell over plain HTTP | Refused for free with a clear message; a headless browser would lift it at the cost of a much larger attack surface |
+| **Live finds lack company/category until the next refresh** | Newly written-through stories show no company and "Other" in the feed for up to 12h | The next scheduled `enrich_pending()` classifies them |
 | **Listing-window overflow** | A very busy source could publish more in 12h than its feed holds | Detected and reported by `IngestRun.window_overflowed`, not yet auto-remediated |
 
 ---
