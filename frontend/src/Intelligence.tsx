@@ -101,7 +101,6 @@ function CitationItem({ citation, entryKey }: { citation: Citation; entryKey: nu
   const meta = [
     sourceLabel(citation.source),
     citation.published_at ? dateFmt.format(parseTime(citation.published_at)) : null,
-    citation.company,
   ].filter(Boolean).join(" · ");
   return (
     <li id={`cite-${entryKey}-${citation.n}`} className="intel-cite">
@@ -142,8 +141,8 @@ function Answer({ entry }: { entry: Entry }) {
       {entry.search && (
         <p className="intel-plan">
           Searched for “{entry.search}”
-          {entry.since_days ? ` · last ${entry.since_days} days` : ""}
-          {entry.terms.length > 0 && ` · ${entry.terms.join(", ")}`}
+          {entry.since_days ? ` in the last ${entry.since_days} days` : ""}
+          {entry.terms.length > 0 && `. Keywords: ${entry.terms.join(", ")}`}
         </p>
       )}
 
@@ -176,7 +175,7 @@ function Answer({ entry }: { entry: Entry }) {
         <p className="answer-meta">
           {entry.model.includes("sonnet") ? "Sonnet 4.6" : "gpt-oss"} · $
           {entry.cost_usd.toFixed(6)}
-          {entry.plan_cached ? " · search plan cached" : ""}
+          {entry.plan_cached ? " (search plan reused)" : ""}
         </p>
       )}
     </article>
@@ -213,25 +212,26 @@ export default function Intelligence() {
   const spent = log.reduce((sum, e) => sum + e.cost_usd, 0);
 
   return (
-    <main className="intel">
+    <main className="intel" id="main">
       <div className="intel-intro">
         <h2>Ask across all six sources</h2>
         <p>
           Each question searches Indian Startup News, Entrackr, Inc42, YourStory,
-          Sujata Chronicle and VCCircle as it is asked, then answers only from
-          what they published — every claim numbered back to its story.
+          Sujata Chronicle and VCCircle as it is asked. Answers use only what they
+          published, and every claim is numbered back to its story.
         </p>
       </div>
 
+      <label className="field-label" htmlFor="intel-question">Your question</label>
       <form
         className="intel-form"
         onSubmit={(e) => { e.preventDefault(); void ask(question); }}
       >
         <input
+          id="intel-question"
           type="search"
           value={question}
           placeholder="What is happening with Zepto's IPO?"
-          aria-label="Your question"
           disabled={busy}
           onChange={(e) => setQuestion(e.target.value)}
         />
@@ -255,7 +255,7 @@ export default function Intelligence() {
         </div>
         <label className="side-toggle">
           <input type="checkbox" checked={live} onChange={(e) => setLive(e.target.checked)} />
-          Search the sites live — free, adds a few seconds
+          Search the sites live (free, adds a few seconds)
         </label>
         <label className="side-toggle">
           <input
@@ -263,14 +263,14 @@ export default function Intelligence() {
             checked={premium}
             onChange={(e) => setPremium(e.target.checked)}
           />
-          Better answers with Sonnet 4.6 — about 20× the cost
+          Better answers with Sonnet 4.6 (about 20x the cost)
         </label>
       </div>
 
       {busy && (
         <div className="intel-pending" aria-live="polite">
           <span className="pulse" />
-          {live ? "Searching six sites live, then reading what they found…" : "Reading the feed…"}
+          {live ? "Searching six sites live, then reading what they found" : "Reading the feed"}
         </div>
       )}
 

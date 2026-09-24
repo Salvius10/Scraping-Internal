@@ -224,14 +224,19 @@ export function categoryColor(category: string | null): string {
 
 /** Colour for a category rendered as *text*.
  *
- * #dbeaff is a surface tone, not a text tone -- it is invisible on white. The
- * quiet family therefore borrows the ink (mid, not soft: the label is the
- * story's attribution and must hold up next to the headline), while capital,
- * ownership and risk keep their own colour.
+ * Bars and rules use the brand colours as they are. Text cannot: #5e9eff and
+ * #fe6e06 read at under 3:1 on white and #dbeaff is invisible, so each family
+ * maps to a shade of the same hue that passes WCAG AA.
  */
+const CATEGORY_INK: Record<string, string> = {
+  "--cat-capital": "var(--brand)",
+  "--cat-ownership": "var(--brand-2-ink)",
+  "--cat-risk": "var(--accent-ink)",
+  "--cat-quiet": "var(--ink-mid)",
+};
+
 export function categoryTextColor(category: string | null): string {
-  const isQuiet = CATEGORY_VAR[category ?? "Other"] === "--cat-quiet";
-  return isQuiet ? "var(--ink-mid)" : categoryColor(category);
+  return CATEGORY_INK[CATEGORY_VAR[category ?? "Other"] ?? "--cat-quiet"];
 }
 
 /** Parse a timestamp from the API as UTC.

@@ -84,9 +84,9 @@ function Result({ entry }: { entry: Entry }) {
             ) : host}
             {!entry.error && (
               <>
-                {" · "}{entry.cached ? "cached, $0" : `$${entry.cost_usd.toFixed(6)}`}
-                {!entry.cached && ` · ${entry.seconds}s`}
-                {entry.rows && ` · ${entry.rows.length} rows`}
+                {" · "}
+                {entry.rows ? `${entry.rows.length} rows, ` : ""}
+                {entry.cached ? "reused, $0" : `$${entry.cost_usd.toFixed(6)} in ${entry.seconds}s`}
               </>
             )}
           </p>
@@ -155,29 +155,35 @@ export default function ExtractPanel({ onClose }: { onClose: () => void }) {
       </div>
 
       <form className="x-form" onSubmit={(e) => { e.preventDefault(); void run(); }}>
-        <input
-          className="side-input"
-          type="url"
-          inputMode="url"
-          value={url}
-          placeholder="https://entrackr.com/tag/funding"
-          aria-label="Page link"
-          disabled={busy}
-          onChange={(e) => setUrl(e.target.value)}
-        />
-        <textarea
-          className="side-input x-prompt"
-          value={prompt}
-          rows={2}
-          maxLength={500}
-          placeholder="What should be pulled out? e.g. every funding round with company, amount and investors"
-          aria-label="What to extract"
-          disabled={busy}
-          onChange={(e) => setPrompt(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void run(); }
-          }}
-        />
+        <div className="field">
+          <label className="field-label" htmlFor="x-url">Page link</label>
+          <input
+            id="x-url"
+            className="side-input"
+            type="url"
+            inputMode="url"
+            value={url}
+            placeholder="https://entrackr.com/tag/funding"
+            disabled={busy}
+            onChange={(e) => setUrl(e.target.value)}
+          />
+        </div>
+        <div className="field">
+          <label className="field-label" htmlFor="x-prompt">What to extract</label>
+          <textarea
+            id="x-prompt"
+            className="side-input x-prompt"
+            value={prompt}
+            rows={2}
+            maxLength={500}
+            placeholder="Every funding round with company, amount and investors"
+            disabled={busy}
+            onChange={(e) => setPrompt(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void run(); }
+            }}
+          />
+        </div>
         <div className="x-form-foot">
           <div className="chips">
             {EXAMPLES.map((example) => (
@@ -197,7 +203,7 @@ export default function ExtractPanel({ onClose }: { onClose: () => void }) {
           </button>
         </div>
         <p className="side-note">
-          Reads the page once with gpt-oss — usually under $0.01. Pages built
+          Reads the page once with gpt-oss, usually for under $0.01. Pages built
           entirely in the browser with JavaScript cannot be read.
         </p>
       </form>
@@ -205,7 +211,7 @@ export default function ExtractPanel({ onClose }: { onClose: () => void }) {
       {busy && (
         <div className="intel-pending" aria-live="polite">
           <span className="pulse" />
-          Fetching the page and reading it — this can take up to a minute…
+          Fetching the page and reading it. This can take up to a minute.
         </div>
       )}
 

@@ -195,7 +195,7 @@ export default function Sidebar({
             checked={premium}
             onChange={(e) => setPremium(e.target.checked)}
           />
-          Better answers with Sonnet 4.6 — about 20× the cost
+          Better answers with Sonnet 4.6 (about 20x the cost)
         </label>
       </section>
 

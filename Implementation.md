@@ -833,8 +833,15 @@ labelled with the model used and what it cost.
 #fe6e06   accent      Policy/Regulation · Shutdown · stale-feed warning
 ```
 
-Everything else is a neutral: one near-black (`#16181f`), two greys, two
-hairlines, one page tint, white. Colour is spent on **meaning** — category,
+Two light brand colours fail WCAG AA as *text* (`#5e9eff` 2.7:1, `#fe6e06`
+2.8:1 on white). They stay for bars, rules and dots; anything written in those
+hues uses a text shade of the same hue: `--brand-2-ink #2563c7` and
+`--accent-ink #b34700` (both 5.4:1+).
+
+Everything else is a neutral: one near-black (`#16181f`), two greys (the
+softer one `#656c81`, raised from 3.3:1 to 4.9:1), two hairlines, one page
+tint, and an off-white surface (`#fdfdfe`). Radius rule: panels 6px, every
+control, tag and badge 4px, nothing pill-shaped. Colour is spent on **meaning** — category,
 state, risk — never on prose. That is what separates a professional tool from a
 styled one.
 

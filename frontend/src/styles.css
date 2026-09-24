@@ -23,12 +23,19 @@
   --wash: #dbeaff;
   --accent: #fe6e06;
 
-  /* Neutrals. */
-  --surface: #ffffff;
+  /* Text shades of the two light brand colours. #5e9eff and #fe6e06 read at
+     2.7:1 and 2.8:1 on white -- fine for bars, rules and dots, below WCAG AA
+     as text. Anything *written* in those hues uses these instead (5.4:1+). */
+  --brand-2-ink: #2563c7;
+  --accent-ink: #b34700;
+
+  /* Neutrals. Surface is off-white rather than #fff, and ink-soft sits at
+     4.9:1 so placeholders, times and counts pass AA (it was 3.3:1). */
+  --surface: #fdfdfe;
   --page: #f6f8fc;
   --ink: #16181f;
   --ink-mid: #5a6072;
-  --ink-soft: #878da0;
+  --ink-soft: #656c81;
   --rule: #e4e7ef;
   --rule-soft: #f0f2f7;
 
@@ -38,7 +45,9 @@
   --cat-risk: var(--accent);
   --cat-quiet: #ced4e4;
 
-  /* One spacing scale, one radius family, one easing. */
+  /* One spacing scale, one radius family, one easing, one duration.
+     Radius rule: panels 6px, every control, tag and badge 4px. Nothing is
+     pill-shaped. */
   --s1: 4px;
   --s2: 8px;
   --s3: 12px;
@@ -48,6 +57,11 @@
   --r: 6px;
   --r-sm: 4px;
   --ease: cubic-bezier(0.2, 0, 0.1, 1);
+  --dur: 180ms;
+
+  /* The only layers: the sticky masthead over the sticky search bar. */
+  --z-masthead: 20;
+  --z-sticky: 10;
 
   --rail: 208px;
   --spine: 46px;
@@ -72,12 +86,46 @@ body {
 
 a { color: inherit; }
 
+@media (prefers-reduced-motion: no-preference) {
+  html { scroll-behavior: smooth; }
+}
+
+/* A physical press on every enabled button. */
+button:not(:disabled):active { transform: translateY(1px); }
+
+/* Headlines break evenly; body copy avoids one-word last lines. */
+h1, h2, h3, h4, .entry-headline, .intel-q { text-wrap: balance; }
+p, .entry-desc { text-wrap: pretty; }
+
+.skip-link {
+  position: absolute;
+  left: var(--s4);
+  top: -48px;
+  z-index: calc(var(--z-masthead) + 1);
+  padding: var(--s2) var(--s3);
+  border-radius: var(--r-sm);
+  background: var(--brand);
+  color: var(--surface);
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.skip-link:focus { top: var(--s2); }
+
+/* New answers and results settle in rather than popping. */
+@keyframes rise {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+
 button {
   font: inherit;
   color: inherit;
   background: none;
   border: none;
   cursor: pointer;
+  transition: transform var(--dur) var(--ease);
 }
 
 :focus-visible {
@@ -119,7 +167,7 @@ button {
   background: var(--surface);
   position: sticky;
   top: 0;
-  z-index: 20;
+  z-index: var(--z-masthead);
 }
 
 .masthead-left {
@@ -138,7 +186,7 @@ button {
   font-size: 13px;
   font-weight: 500;
   color: var(--ink-mid);
-  transition: color 110ms var(--ease);
+  transition: color var(--dur) var(--ease);
 }
 
 .views button:hover { color: var(--ink); }
@@ -190,7 +238,7 @@ button {
   flex: none;
 }
 
-.freshness[data-stale="true"] { color: var(--accent); }
+.freshness[data-stale="true"] { color: var(--accent-ink); }
 .freshness[data-stale="true"] .pulse { background: var(--accent); }
 
 /* Deal volume per day. Also a date filter. */
@@ -214,7 +262,7 @@ button {
   height: 100%;
   padding: 0;
   border-radius: 2px 2px 0 0;
-  transition: background 120ms var(--ease);
+  transition: background var(--dur) var(--ease);
 }
 
 .activity-day:hover { background: var(--rule-soft); }
@@ -224,7 +272,7 @@ button {
   min-height: 2px;
   background: var(--brand-2);
   border-radius: 1px 1px 0 0;
-  transition: background 120ms var(--ease);
+  transition: background var(--dur) var(--ease);
 }
 
 .activity-day:hover .activity-bar,
@@ -273,7 +321,7 @@ button {
   font-size: 13px;
   color: var(--ink-mid);
   text-align: left;
-  transition: color 110ms var(--ease), background 110ms var(--ease);
+  transition: color var(--dur) var(--ease), background var(--dur) var(--ease);
 }
 
 .rail-item:hover { background: var(--surface); color: var(--ink); }
@@ -324,7 +372,7 @@ button {
   position: sticky;
   top: var(--head);
   background: var(--page);
-  z-index: 10;
+  z-index: var(--z-sticky);
 }
 
 .searchbar input {
@@ -415,7 +463,7 @@ button {
   gap: 0 var(--s3);
   padding: 11px var(--s4);
   border-bottom: 1px solid var(--rule-soft);
-  transition: background 110ms var(--ease);
+  transition: background var(--dur) var(--ease);
 }
 
 .entry:last-child { border-bottom: none; }
@@ -509,19 +557,19 @@ button {
   padding: 0 4px;
   border-radius: var(--r-sm);
   color: var(--ink-soft);
-  transition: color 110ms var(--ease), background 110ms var(--ease);
+  transition: color var(--dur) var(--ease), background var(--dur) var(--ease);
 }
 
 .copy-link:hover { color: var(--brand); background: var(--wash); }
 .copy-link[data-state="copied"] { color: var(--brand); }
-.copy-link[data-state="failed"] { color: var(--accent); }
+.copy-link[data-state="failed"] { color: var(--accent-ink); }
 .copy-link-text { font-size: 11px; font-weight: 600; }
 .copy-link-text:empty { display: none; }
 
 .corroboration {
   padding: 0 7px;
   border: 1px solid var(--rule);
-  border-radius: 100px;
+  border-radius: var(--r-sm);
   font-size: 11px;
 }
 
@@ -529,7 +577,7 @@ button {
   font-size: 11.5px;
   color: var(--ink-soft);
   opacity: 0;
-  transition: opacity 110ms var(--ease);
+  transition: opacity var(--dur) var(--ease);
 }
 
 .entry:hover .entry-ask, .entry-ask:focus-visible { opacity: 1; }
@@ -651,11 +699,11 @@ button {
 .chip {
   padding: 3px 9px;
   border: 1px solid var(--rule);
-  border-radius: 100px;
+  border-radius: var(--r-sm);
   font-size: 11.5px;
   color: var(--ink-mid);
-  transition: border-color 110ms var(--ease), background 110ms var(--ease),
-    color 110ms var(--ease);
+  transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease),
+    color var(--dur) var(--ease);
 }
 
 .chip:hover {
@@ -677,8 +725,8 @@ button {
   border-radius: var(--r-sm);
   font-size: 12.5px;
   color: var(--ink);
-  transition: border-color 110ms var(--ease), background 110ms var(--ease),
-    color 110ms var(--ease);
+  transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease),
+    color var(--dur) var(--ease);
 }
 
 .side-button:hover:not(:disabled) {
@@ -759,7 +807,7 @@ button {
   background: var(--brand-2);
 }
 
-.answer-error { margin: 0; font-size: 12.5px; color: var(--accent); }
+.answer-error { margin: 0; font-size: 12.5px; color: var(--accent-ink); }
 .answer-meta { margin: var(--s1) 0 0; font-size: 11px; color: var(--ink-soft); }
 
 .side-spent {
@@ -768,6 +816,16 @@ button {
   border-top: 1px solid var(--rule-soft);
   font-size: 11px;
   color: var(--ink-soft);
+}
+
+/* ── Form labels ──────────────────────────────────────────────────────── */
+
+.field { display: flex; flex-direction: column; gap: var(--s1); }
+
+.field-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-mid);
 }
 
 /* ── Extract from a URL ───────────────────────────────────────────────── */
@@ -822,6 +880,7 @@ button {
 .x-panel .intel-pending { margin: var(--s3) 0 0; }
 
 .x-result {
+  animation: rise 240ms var(--ease) both;
   margin-top: var(--s4);
   padding-top: var(--s3);
   border-top: 1px solid var(--rule-soft);
@@ -920,6 +979,8 @@ button {
   max-width: 64ch;
 }
 
+.intel .field-label { display: block; margin-bottom: var(--s1); }
+
 .intel-form { display: flex; gap: var(--s2); }
 
 .intel-form input {
@@ -984,6 +1045,7 @@ button {
 @keyframes breathe { from { opacity: 0.25; } to { opacity: 1; } }
 
 .intel-answer {
+  animation: rise 240ms var(--ease) both;
   margin-bottom: var(--s4);
   padding: var(--s4) var(--s5) var(--s5);
   border: 1px solid var(--rule);
@@ -1016,7 +1078,7 @@ button {
   min-width: 16px;
   margin: 0 1px;
   padding: 0 4px;
-  border-radius: 3px;
+  border-radius: var(--r-sm);
   background: var(--wash);
   color: var(--brand);
   font-size: 10.5px;
@@ -1041,7 +1103,7 @@ button {
 .intel-sources li {
   padding: 2px 8px;
   border: 1px solid var(--rule);
-  border-radius: 100px;
+  border-radius: var(--r-sm);
   font-size: 11px;
   color: var(--ink-soft);
 }
@@ -1050,7 +1112,7 @@ button {
 
 .intel-sources li[data-status="ok"] { border-color: var(--wash); background: var(--page); }
 .intel-sources li[data-status="timeout"],
-.intel-sources li[data-status="error"] { color: var(--accent); }
+.intel-sources li[data-status="error"] { color: var(--accent-ink); }
 
 .intel-list-head {
   margin: var(--s4) 0 var(--s2);
@@ -1106,8 +1168,8 @@ button {
 
 .intel-new {
   padding: 0 6px;
-  border-radius: 100px;
-  background: var(--brand-2);
+  border-radius: var(--r-sm);
+  background: var(--brand-2-ink);
   color: var(--surface);
   font-size: 10.5px;
 }

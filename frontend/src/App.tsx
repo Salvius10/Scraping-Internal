@@ -32,7 +32,7 @@ function describeAge(hours: number | null, interval: number): string {
   if (hours < 1) return `Refreshed ${Math.max(1, Math.round(hours * 60))} min ago`;
   if (hours < 24) return `Refreshed ${Math.round(hours)}h ago`;
   const days = Math.floor(hours / 24);
-  return `Refreshed ${days} day${days > 1 ? "s" : ""} ago — expected every ${interval}h`;
+  return `Refreshed ${days} day${days > 1 ? "s" : ""} ago (expected every ${interval}h)`;
 }
 
 type View = "feed" | "intelligence";
@@ -191,7 +191,7 @@ function Entry({
   return (
     <article className="entry" data-selected={selected}>
       <div className="entry-time">
-        {article.published_at ? timeFmt.format(parseTime(article.published_at)) : "—"}
+        {article.published_at ? timeFmt.format(parseTime(article.published_at)) : ""}
       </div>
       <div className="entry-rule" style={{ background: hue }} />
       <div className="entry-body">
@@ -371,6 +371,7 @@ export default function App() {
   if (view === "intelligence") {
     return (
       <div className="shell" data-view="intelligence">
+        <a className="skip-link" href="#main">Skip to content</a>
         <Masthead
           status={status}
           activity={activity}
@@ -386,6 +387,7 @@ export default function App() {
 
   return (
     <div className="shell" data-sidebar={sidebarOpen ? "open" : "closed"}>
+      <a className="skip-link" href="#main">Skip to stories</a>
       <Masthead
         status={status}
         activity={activity}
@@ -405,7 +407,7 @@ export default function App() {
         filtered={filtered}
       />
 
-      <main className="tape">
+      <main className="tape" id="main">
         <div className="searchbar">
           <input
             type="search"
@@ -496,7 +498,7 @@ export default function App() {
 
         {hasMore && !activeDay && (
           <button className="more" onClick={() => void load(true)} disabled={loading}>
-            {loading ? "Loading" : `Load more — ${total - articles.length} older stories`}
+            {loading ? "Loading" : `Load ${total - articles.length} older stories`}
           </button>
         )}
       </main>

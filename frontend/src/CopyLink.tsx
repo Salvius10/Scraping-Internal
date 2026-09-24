@@ -20,6 +20,12 @@ async function copyText(text: string): Promise<boolean> {
   }
 }
 
+// Phosphor Icons (MIT), regular weight: "copy" and "check".
+const COPY =
+  "M216,32H88a8,8,0,0,0-8,8V80H40a8,8,0,0,0-8,8V216a8,8,0,0,0,8,8H168a8,8,0,0,0,8-8V176h40a8,8,0,0,0,8-8V40A8,8,0,0,0,216,32ZM160,208H48V96H160Zm48-48H176V88a8,8,0,0,0-8-8H96V48H208Z";
+const CHECK =
+  "M229.66,77.66l-128,128a8,8,0,0,1-11.32,0l-56-56a8,8,0,0,1,11.32-11.32L96,188.69,218.34,66.34a8,8,0,0,1,11.32,11.32Z";
+
 /** A small button that copies a story's link and confirms it did. */
 export default function CopyLink({ url }: { url: string }) {
   const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
@@ -42,19 +48,9 @@ export default function CopyLink({ url }: { url: string }) {
       title={label}
       onClick={async () => setState((await copyText(url)) ? "copied" : "failed")}
     >
-      {state === "copied" ? (
-        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-          <path d="M3 8.5l3 3 7-7" fill="none" stroke="currentColor" strokeWidth="1.8"
-            strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      ) : (
-        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-          <rect x="5.5" y="5.5" width="8" height="8" rx="1.5" fill="none"
-            stroke="currentColor" strokeWidth="1.5" />
-          <path d="M10.5 3.5v-.5A1.5 1.5 0 0 0 9 1.5H4A1.5 1.5 0 0 0 2.5 3v5A1.5 1.5 0 0 0 4 9.5h.5"
-            fill="none" stroke="currentColor" strokeWidth="1.5" />
-        </svg>
-      )}
+      <svg viewBox="0 0 256 256" width="14" height="14" fill="currentColor" aria-hidden="true">
+        <path d={state === "copied" ? CHECK : COPY} />
+      </svg>
       <span className="copy-link-text" aria-live="polite">
         {state === "copied" ? "Copied" : state === "failed" ? "Failed" : ""}
       </span>
