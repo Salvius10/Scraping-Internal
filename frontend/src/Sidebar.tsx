@@ -111,121 +111,141 @@ export default function Sidebar({
 
   return (
     <aside className="sidebar" aria-label="Assistant">
-      <div className="sidebar-head">
-        <h2>Ask</h2>
+      <header className="sidebar-head">
+        <div>
+          <h2>Ask</h2>
+          <p>Filter, summarise or question the stories in the feed.</p>
+        </div>
         <button className="sidebar-close" onClick={onClose} aria-label="Close assistant">
           Close
         </button>
-      </div>
+      </header>
 
-      {/* Filtering in words. Compiles to a query, so cost does not grow
-          with the size of the feed. */}
-      <section className="side-block">
-        <h3>Filter in your own words</h3>
-        <form
-          onSubmit={(e) => { e.preventDefault(); void runFilter(phrase); }}
-        >
-          <input
-            className="side-input"
-            value={phrase}
-            placeholder="funding rounds this week"
-            aria-label="Describe the stories you want"
-            onChange={(e) => setPhrase(e.target.value)}
-          />
-        </form>
-        <div className="chips">
-          {FILTER_EXAMPLES.map((example) => (
-            <button
-              key={example}
-              className="chip"
-              onClick={() => { setPhrase(example); void runFilter(example); }}
-            >
-              {example}
-            </button>
-          ))}
-        </div>
-        {filtering && <p className="side-note">Reading that…</p>}
-        {filterNote && !filtering && <p className="side-note">{filterNote}</p>}
-      </section>
-
-      <section className="side-block">
-        <h3>The stories on screen</h3>
-        <div className="side-actions">
-          <button
-            className="side-button"
-            disabled={busy || visible.length === 0}
-            onClick={() => void ask("summarise")}
+      <div className="sidebar-body">
+        {/* Filtering in words. Compiles to a query, so cost does not grow
+            with the size of the feed. */}
+        <section className="side-block">
+          <label className="side-label" htmlFor="side-filter">Filter in your own words</label>
+          <form
+            className="side-field"
+            onSubmit={(e) => { e.preventDefault(); void runFilter(phrase); }}
           >
-            Summarise {visible.length}
-          </button>
-          {selected && (
+            <input
+              id="side-filter"
+              className="side-input"
+              value={phrase}
+              placeholder="funding rounds this week"
+              onChange={(e) => setPhrase(e.target.value)}
+            />
+            <button type="submit" className="side-go" disabled={filtering || !phrase.trim()}>
+              Apply
+            </button>
+          </form>
+          <div className="chips">
+            {FILTER_EXAMPLES.map((example) => (
+              <button
+                key={example}
+                className="chip"
+                onClick={() => { setPhrase(example); void runFilter(example); }}
+              >
+                {example}
+              </button>
+            ))}
+          </div>
+          {filtering && <p className="side-note">Reading that</p>}
+          {filterNote && !filtering && <p className="side-status">{filterNote}</p>}
+        </section>
+
+        <section className="side-block">
+          <span className="side-label">The stories on screen</span>
+          <div className="side-actions">
             <button
-              className="side-button"
-              disabled={busy}
-              onClick={() => void ask("explain")}
+              className="side-primary"
+              disabled={busy || visible.length === 0}
+              onClick={() => void ask("summarise")}
             >
-              Explain selected
+              Summarise {visible.length} stories
             </button>
-          )}
-        </div>
-
-        {selected && (
-          <p className="side-selected">
-            {selected.headline}
-            <button className="side-unselect" onClick={onClearSelection}>
-              clear
-            </button>
-          </p>
-        )}
-
-        <form onSubmit={(e) => { e.preventDefault(); void ask("ask", question); }}>
-          <input
-            className="side-input"
-            value={question}
-            placeholder="Ask about these stories"
-            aria-label="Ask a question about the stories on screen"
-            disabled={busy}
-            onChange={(e) => setQuestion(e.target.value)}
-          />
-        </form>
-
-        <label className="side-toggle">
-          <input
-            type="checkbox"
-            checked={premium}
-            onChange={(e) => setPremium(e.target.checked)}
-          />
-          Better answers with Sonnet 4.6 (about 20x the cost)
-        </label>
-      </section>
-
-      <section className="side-log">
-        {busy && <p className="side-note">Thinking…</p>}
-        {[...log].reverse().map((entry) => (
-          <article key={entry.id} className="answer">
-            <h4>{entry.question}</h4>
-            {entry.error
-              ? <p className="answer-error">{entry.error}</p>
-              : entry.answer && renderAnswer(entry.answer)}
-            {!entry.error && (
-              <p className="answer-meta">
-                {entry.model?.includes("sonnet") ? "Sonnet 4.6" : "gpt-oss"} ·
-                {" "}${entry.cost.toFixed(6)}
-              </p>
+            {selected && (
+              <button
+                className="side-secondary"
+                disabled={busy}
+                onClick={() => void ask("explain")}
+              >
+                Explain selected
+              </button>
             )}
-          </article>
-        ))}
-        {log.length === 0 && !busy && (
-          <p className="side-note">
-            Answers appear here. Everything is drawn from the stories already
-            in the feed.
-          </p>
-        )}
-      </section>
+          </div>
 
-      {spent > 0 && (
-        <p className="side-spent">This session: ${spent.toFixed(6)}</p>
-      )}
+          {selected && (
+            <p className="side-selected">
+              {selected.headline}
+              <button className="side-unselect" onClick={onClearSelection}>
+                clear
+              </button>
+            </p>
+          )}
+
+          <label className="side-label" htmlFor="side-question">Ask a question</label>
+          <form
+            className="side-field"
+            onSubmit={(e) => { e.preventDefault(); void ask("ask", question); }}
+          >
+            <input
+              id="side-question"
+              className="side-input"
+              value={question}
+              placeholder="Which of these are Series B or later?"
+              disabled={busy}
+              onChange={(e) => setQuestion(e.target.value)}
+            />
+            <button type="submit" className="side-go" disabled={busy || !question.trim()}>
+              Ask
+            </button>
+          </form>
+
+          <label className="side-switch">
+            <input
+              type="checkbox"
+              role="switch"
+              checked={premium}
+              onChange={(e) => setPremium(e.target.checked)}
+            />
+            <span className="side-switch-track" aria-hidden="true" />
+            <span>
+              <strong>Sonnet 4.6</strong>
+              <span className="side-switch-note">Better answers, about 20x the cost</span>
+            </span>
+          </label>
+        </section>
+
+        <section className="side-log" aria-live="polite">
+          {busy && (
+            <div className="side-thinking">
+              <span className="pulse" />
+              Thinking
+            </div>
+          )}
+          {[...log].reverse().map((entry) => (
+            <article key={entry.id} className="answer">
+              <h4>{entry.question}</h4>
+              {entry.error
+                ? <p className="answer-error">{entry.error}</p>
+                : entry.answer && renderAnswer(entry.answer)}
+              {!entry.error && (
+                <p className="answer-meta">
+                  {entry.model?.includes("sonnet") ? "Sonnet 4.6" : "gpt-oss"} · $
+                  {entry.cost.toFixed(6)}
+                </p>
+              )}
+            </article>
+          ))}
+        </section>
+
+        {spent > 0 && (
+          <p className="side-spent">This session: ${spent.toFixed(6)}</p>
+        )}
+      </div>
     </aside>
   );
 }

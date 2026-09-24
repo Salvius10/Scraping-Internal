@@ -1,4 +1,4 @@
-/* Dealflow — a working tool for tracking Indian startup deal flow.
+/* GPS (Ganit Pursuit OS) -- a working tool for tracking Indian startup deal flow.
 
    Light theme only. Brand palette is exactly four values:
 
@@ -27,17 +27,33 @@
      2.7:1 and 2.8:1 on white -- fine for bars, rules and dots, below WCAG AA
      as text. Anything *written* in those hues uses these instead (5.4:1+). */
   --brand-2-ink: #2563c7;
+
+  /* Text on the #1a00d9 band: #c9dcff for secondary text (7.4:1), and a
+     light orange for the stale warning (5.8:1) where #fe6e06 is only 3.6:1. */
+  --on-brand-soft: #c9dcff;
+  --on-brand-warn: #ffb27a;
+
+  /* Filled surfaces carry white text only. White on #fe6e06 is 2.8:1 and on
+     #5e9eff 2.6:1, so orange fills use a deeper shade of the same hue (4.6:1),
+     lit by the bright original so they still read as the brand. */
+  --accent-fill: #c64e00;
+  --accent-fill-hover: #b84a00;
+  --accent-tint: #fff1e6;
+  --glow-accent: radial-gradient(120% 140% at 100% 0%, rgba(254, 110, 6, 0.75), transparent 60%);
+
+  /* Depth, tinted with the brand blue rather than grey. */
+  --shadow: 0 1px 2px rgba(26, 0, 217, 0.05), 0 10px 28px -14px rgba(26, 0, 217, 0.22);
   --accent-ink: #b34700;
 
   /* Neutrals. Surface is off-white rather than #fff, and ink-soft sits at
      4.9:1 so placeholders, times and counts pass AA (it was 3.3:1). */
   --surface: #fdfdfe;
-  --page: #f6f8fc;
+  --page: #f4f7ff;          /* page tint drawn from the #dbeaff wash */
   --ink: #16181f;
   --ink-mid: #5a6072;
   --ink-soft: #656c81;
-  --rule: #e4e7ef;
-  --rule-soft: #f0f2f7;
+  --rule: #dde5f5;
+  --rule-soft: #edf2fc;
 
   /* One family per brand colour. */
   --cat-capital: var(--brand);
@@ -163,12 +179,19 @@ button {
   height: var(--head);
   margin: 0 calc(var(--s5) * -1) var(--s5);
   padding: 0 var(--s5);
-  border-bottom: 1px solid var(--rule);
-  background: var(--surface);
+  /* Primary band, lit from the top right by the secondary blue. */
+  background:
+    radial-gradient(90% 180% at 100% 0%, rgba(94, 158, 255, 0.45), transparent 60%),
+    radial-gradient(60% 140% at 0% 100%, rgba(254, 110, 6, 0.16), transparent 60%),
+    var(--brand);
+  box-shadow: inset 0 -3px 0 var(--accent);
+  color: var(--surface);
   position: sticky;
   top: 0;
   z-index: var(--z-masthead);
 }
+
+.masthead :focus-visible { outline-color: var(--surface); }
 
 .masthead-left {
   display: flex;
@@ -185,23 +208,23 @@ button {
   padding: 0 var(--s2);
   font-size: 13px;
   font-weight: 500;
-  color: var(--ink-mid);
+  color: var(--on-brand-soft);
   transition: color var(--dur) var(--ease);
 }
 
-.views button:hover { color: var(--ink); }
+.views button:hover { color: var(--surface); }
 
-.views button[aria-current="page"] { color: var(--brand); font-weight: 600; }
+.views button[aria-current="page"] { color: var(--surface); font-weight: 600; }
 
 .views button[aria-current="page"]::after {
   content: "";
   position: absolute;
   left: var(--s2);
   right: var(--s2);
-  bottom: -1px;
-  height: 2px;
-  border-radius: 1px;
-  background: var(--brand);
+  bottom: 3px;
+  height: 3px;
+  border-radius: 2px 2px 0 0;
+  background: var(--accent);
 }
 
 .wordmark {
@@ -212,13 +235,27 @@ button {
   font-size: 16px;
   font-weight: 600;
   letter-spacing: -0.014em;
-  color: var(--ink);
+  color: var(--surface);
 }
 
-.wordmark span {
+.brandmark {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  align-self: center;
+  border-radius: var(--r-sm);
+  background: var(--glow-accent), var(--accent-fill);
+  color: var(--surface);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.wordmark .wordmark-sub {
   font-size: 13px;
   font-weight: 400;
-  color: var(--ink-soft);
+  color: var(--on-brand-soft);
   letter-spacing: 0;
 }
 
@@ -227,7 +264,7 @@ button {
   align-items: center;
   gap: 7px;
   font-size: 12.5px;
-  color: var(--ink-mid);
+  color: var(--on-brand-soft);
 }
 
 .pulse {
@@ -238,7 +275,7 @@ button {
   flex: none;
 }
 
-.freshness[data-stale="true"] { color: var(--accent-ink); }
+.freshness[data-stale="true"] { color: var(--on-brand-warn); }
 .freshness[data-stale="true"] .pulse { background: var(--accent); }
 
 /* Deal volume per day. Also a date filter. */
@@ -249,7 +286,7 @@ button {
   gap: 2px;
   height: 28px;
   margin-bottom: 13px;
-  border-bottom: 1px solid var(--rule);
+  border-bottom: 1px solid rgba(201, 220, 255, 0.35);
 }
 
 .activity-day {
@@ -265,7 +302,7 @@ button {
   transition: background var(--dur) var(--ease);
 }
 
-.activity-day:hover { background: var(--rule-soft); }
+.activity-day:hover { background: rgba(219, 234, 255, 0.14); }
 
 .activity-bar {
   width: 100%;
@@ -276,17 +313,17 @@ button {
 }
 
 .activity-day:hover .activity-bar,
-.activity-day[aria-pressed="true"] .activity-bar { background: var(--brand); }
+.activity-day[aria-pressed="true"] .activity-bar { background: var(--surface); }
 
 .activity-label {
   position: absolute;
   bottom: -13px;
   font-size: 9.5px;
-  color: var(--ink-soft);
+  color: var(--on-brand-soft);
 }
 
 .activity-day[aria-pressed="true"] .activity-label {
-  color: var(--brand);
+  color: var(--surface);
   font-weight: 600;
 }
 
@@ -308,7 +345,7 @@ button {
   padding: 0 var(--s2);
   font-size: 11px;
   font-weight: 600;
-  color: var(--ink-soft);
+  color: var(--brand);
 }
 
 .rail-item {
@@ -327,8 +364,8 @@ button {
 .rail-item:hover { background: var(--surface); color: var(--ink); }
 
 .rail-item[aria-pressed="true"] {
-  background: var(--wash);
-  color: var(--brand);
+  background: var(--brand);
+  color: var(--surface);
   font-weight: 600;
 }
 
@@ -342,11 +379,14 @@ button {
 
 .rail-item .count {
   margin-left: auto;
+  padding: 0 6px;
+  border-radius: var(--r-sm);
+  background: var(--rule-soft);
   font-size: 11.5px;
-  color: var(--ink-soft);
+  color: var(--ink-mid);
 }
 
-.rail-item[aria-pressed="true"] .count { color: var(--brand); }
+.rail-item[aria-pressed="true"] .count { background: var(--accent-fill); color: var(--surface); }
 
 .rail-clear {
   margin-left: var(--s2);
@@ -398,16 +438,29 @@ button {
 .ask-toggle {
   height: 34px;
   padding: 0 var(--s4);
-  border: 1px solid var(--rule);
+  border: 1px solid var(--brand-2);
   border-radius: var(--r-sm);
   background: var(--surface);
   font-size: 13px;
   font-weight: 500;
-  color: var(--ink-mid);
+  color: var(--brand);
   white-space: nowrap;
 }
 
-.ask-toggle:hover { border-color: var(--brand); color: var(--brand); }
+.ask-toggle:hover { border-color: var(--brand); background: var(--wash); }
+
+/* The page's one orange action. */
+.ask-toggle--cta {
+  border-color: var(--accent-fill);
+  background: var(--glow-accent), var(--accent-fill);
+  color: var(--surface);
+  font-weight: 600;
+}
+
+.ask-toggle--cta:hover {
+  border-color: var(--accent-fill-hover);
+  background: var(--accent-fill-hover);
+}
 
 .ask-toggle[aria-pressed="true"] {
   background: var(--brand);
@@ -422,7 +475,7 @@ button {
   margin: 0 0 var(--s3);
   padding: 8px var(--s3);
   border: 1px solid var(--rule);
-  border-left: 3px solid var(--brand);
+  border-left: 3px solid var(--accent);
   border-radius: var(--r-sm);
   background: var(--surface);
   font-size: 13px;
@@ -443,10 +496,16 @@ button {
   padding: var(--s5) 0 var(--s2);
   font-size: 12px;
   font-weight: 600;
-  color: var(--ink);
+  color: var(--brand);
 }
 
-.daymark .n { font-weight: 400; color: var(--ink-soft); }
+.daymark .n {
+  padding: 0 6px;
+  border-radius: var(--r-sm);
+  background: var(--wash);
+  font-weight: 500;
+  color: var(--brand);
+}
 
 /* One panel per day tidies the tape without making every entry a card. */
 .day-panel {
@@ -489,6 +548,26 @@ button {
 }
 
 .entry-body { min-width: 0; }
+
+/* Stories under three hours old. Orange marks what is new, nothing else. */
+.just-in {
+  padding: 0 6px;
+  border-radius: var(--r-sm);
+  background: var(--accent-fill);
+  color: var(--surface);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 18px;
+}
+
+.today {
+  padding: 0 6px;
+  border-radius: var(--r-sm);
+  background: var(--accent-tint);
+  color: var(--accent-ink);
+  font-size: 11px;
+  font-weight: 700;
+}
 
 /* The outlet that reported it, then copy -- one line above the headline. */
 .entry-kicker {
@@ -541,7 +620,7 @@ button {
 
 /* The outlet is what a reader checks before trusting a line, so it is set
    bold rather than left as grey metadata. */
-.entry-source { white-space: nowrap; font-weight: 600; color: var(--ink); }
+.entry-source { white-space: nowrap; font-weight: 600; color: var(--brand); }
 
 /* #dbeaff is a surface tone and unreadable as text, so the quiet family's
    label borrows the ink; the other three keep their own colour. */
@@ -622,7 +701,7 @@ button {
   height: 58px;
   margin-bottom: var(--s2);
   border-radius: var(--r);
-  background: linear-gradient(90deg, var(--surface), var(--rule-soft), var(--surface));
+  background: linear-gradient(90deg, var(--surface), var(--wash), var(--surface));
   background-size: 200% 100%;
   animation: shimmer 1.4s linear infinite;
 }
@@ -635,30 +714,63 @@ button {
   position: sticky;
   top: calc(var(--head) + var(--s5));
   align-self: start;
+  display: flex;
+  flex-direction: column;
   max-height: calc(100vh - var(--head) - var(--s6));
-  overflow-y: auto;
-  padding: var(--s4);
+  overflow: hidden;
   border: 1px solid var(--rule);
   border-radius: var(--r);
   background: var(--surface);
+  box-shadow: var(--shadow);
 }
 
+/* The same primary band as the masthead, so the assistant reads as part of
+   the brand rather than a bolted-on form. */
 .sidebar-head {
   display: flex;
-  align-items: baseline;
+  align-items: flex-start;
   justify-content: space-between;
-  margin-bottom: var(--s4);
+  gap: var(--s3);
+  padding: var(--s4) var(--s4) calc(var(--s4) + 3px);
+  background:
+    radial-gradient(110% 160% at 100% 0%, rgba(94, 158, 255, 0.5), transparent 60%),
+    var(--brand);
+  box-shadow: inset 0 -3px 0 var(--accent);
+  color: var(--surface);
 }
 
 .sidebar-head h2 {
   margin: 0;
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 600;
-  color: var(--ink);
+  letter-spacing: -0.01em;
+  color: var(--surface);
 }
 
-.sidebar-close { font-size: 12px; color: var(--ink-soft); }
-.sidebar-close:hover { color: var(--brand); }
+.sidebar-head p {
+  margin: 2px 0 0;
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--on-brand-soft);
+}
+
+.sidebar-close {
+  flex: none;
+  padding: 3px var(--s2);
+  border: 1px solid rgba(201, 220, 255, 0.45);
+  border-radius: var(--r-sm);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--surface);
+  transition: background var(--dur) var(--ease), transform var(--dur) var(--ease);
+}
+
+.sidebar-close:hover { background: rgba(219, 234, 255, 0.16); }
+
+.sidebar-body {
+  overflow-y: auto;
+  padding: var(--s4);
+}
 
 .side-block {
   padding-bottom: var(--s4);
@@ -666,12 +778,142 @@ button {
   border-bottom: 1px solid var(--rule-soft);
 }
 
-.side-block h3 {
-  margin: 0 0 var(--s2);
-  font-size: 11.5px;
+.side-label {
+  display: block;
+  margin: 0 0 6px;
+  font-size: 12px;
   font-weight: 600;
-  color: var(--ink-soft);
+  color: var(--brand);
 }
+
+.side-block .side-label:not(:first-child) { margin-top: var(--s4); }
+
+/* Input with its own action button beside it. */
+.side-field { display: flex; gap: 6px; }
+
+.side-go {
+  flex: none;
+  height: 36px;
+  padding: 0 var(--s3);
+  border-radius: var(--r-sm);
+  background: var(--glow-accent), var(--accent-fill);
+  color: var(--surface);
+  font-size: 12.5px;
+  font-weight: 600;
+  transition: background var(--dur) var(--ease), transform var(--dur) var(--ease),
+    opacity var(--dur) var(--ease);
+}
+
+.side-go:not(:disabled):hover { background: var(--accent-fill-hover); }
+.side-go:disabled { opacity: 0.45; cursor: default; }
+
+.side-primary, .side-secondary {
+  height: 34px;
+  padding: 0 var(--s3);
+  border-radius: var(--r-sm);
+  font-size: 12.5px;
+  font-weight: 600;
+  transition: background var(--dur) var(--ease), transform var(--dur) var(--ease);
+}
+
+.side-primary {
+  background:
+    radial-gradient(120% 160% at 100% 0%, rgba(94, 158, 255, 0.45), transparent 60%),
+    var(--brand);
+  color: var(--surface);
+}
+
+.side-primary:not(:disabled):hover { background: #2a12e8; }
+
+.side-secondary {
+  border: 1px solid var(--brand-2);
+  background: var(--surface);
+  color: var(--brand);
+}
+
+.side-secondary:not(:disabled):hover { background: var(--wash); }
+.side-primary:disabled, .side-secondary:disabled { opacity: 0.45; cursor: default; }
+
+/* Result of a phrase filter: a confirmed state, so it gets a quiet frame. */
+.side-status {
+  margin: var(--s2) 0 0;
+  padding: 7px 10px;
+  border-left: 3px solid var(--accent);
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  background: var(--accent-tint);
+  font-size: 12px;
+  color: var(--accent-ink);
+  line-height: 1.4;
+}
+
+/* Sonnet opt-in as a switch, with its cost said plainly. */
+.side-switch {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  margin-top: var(--s3);
+  padding: 10px var(--s3);
+  border-radius: var(--r);
+  background: var(--page);
+  font-size: 12.5px;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.side-switch input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+}
+
+.side-switch-track {
+  position: relative;
+  flex: none;
+  width: 32px;
+  height: 18px;
+  border-radius: 9px;
+  background: #c3cde3;
+  transition: background var(--dur) var(--ease);
+}
+
+.side-switch-track::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: 0 1px 2px rgba(26, 0, 217, 0.25);
+  transition: transform var(--dur) var(--ease);
+}
+
+.side-switch input:checked + .side-switch-track { background: var(--brand); }
+.side-switch input:checked + .side-switch-track::after { transform: translateX(14px); }
+
+.side-switch input:focus-visible + .side-switch-track {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+.side-switch strong { display: block; font-weight: 600; color: var(--brand); }
+.side-switch-note { display: block; font-size: 11.5px; color: var(--ink-mid); }
+
+.side-thinking {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: 10px var(--s3);
+  border-radius: var(--r);
+  background: var(--wash);
+  font-size: 12.5px;
+  color: var(--brand);
+}
+
+.side-thinking .pulse { animation: breathe 1.2s var(--ease) infinite alternate; }
 
 .side-input {
   width: 100%;
@@ -697,18 +939,20 @@ button {
 .chips { display: flex; flex-wrap: wrap; gap: var(--s1); margin-top: var(--s2); }
 
 .chip {
-  padding: 3px 9px;
-  border: 1px solid var(--rule);
+  padding: 4px 10px;
+  border: 1px solid transparent;
   border-radius: var(--r-sm);
+  background: var(--wash);
   font-size: 11.5px;
-  color: var(--ink-mid);
+  font-weight: 500;
+  color: var(--brand);
   transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease),
     color var(--dur) var(--ease);
 }
 
 .chip:hover {
-  border-color: var(--brand);
-  background: var(--wash);
+  border-color: var(--brand-2);
+  background: var(--surface);
   color: var(--brand);
 }
 
@@ -818,6 +1062,30 @@ button {
   color: var(--ink-soft);
 }
 
+/* Sidebar versions of shared pieces. */
+.sidebar .side-input { height: 36px; }
+
+.sidebar .answer {
+  animation: rise 240ms var(--ease) both;
+  padding: var(--s3);
+  border-left: 3px solid var(--brand-2);
+  border-radius: 0 var(--r) var(--r) 0;
+  background: var(--page);
+}
+
+.sidebar .answer h4 { color: var(--brand); font-size: 12px; }
+
+.sidebar .side-spent {
+  display: inline-block;
+  margin-top: var(--s4);
+  padding: 3px var(--s2);
+  border: none;
+  border-radius: var(--r-sm);
+  background: var(--wash);
+  color: var(--brand);
+  font-weight: 600;
+}
+
 /* ── Form labels ──────────────────────────────────────────────────────── */
 
 .field { display: flex; flex-direction: column; gap: var(--s1); }
@@ -845,7 +1113,7 @@ button {
   margin-bottom: var(--s3);
 }
 
-.x-panel-head h2 { margin: 0; font-size: 14px; font-weight: 600; }
+.x-panel-head h2 { margin: 0; font-size: 14px; font-weight: 600; color: var(--brand); }
 
 .x-form { display: flex; flex-direction: column; gap: var(--s2); }
 
@@ -870,11 +1138,13 @@ button {
   height: 32px;
   padding: 0 var(--s5);
   border-radius: var(--r-sm);
-  background: var(--brand);
+  background: var(--glow-accent), var(--accent-fill);
   color: var(--surface);
   font-size: 13px;
   font-weight: 600;
 }
+
+.x-run:not(:disabled):hover { background: var(--accent-fill-hover); }
 
 .x-run:disabled { opacity: 0.45; cursor: default; }
 .x-panel .intel-pending { margin: var(--s3) 0 0; }
@@ -970,6 +1240,7 @@ button {
   font-size: 18px;
   font-weight: 600;
   letter-spacing: -0.012em;
+  color: var(--brand);
 }
 
 .intel-intro p {
@@ -1008,11 +1279,13 @@ button {
   height: 40px;
   padding: 0 var(--s5);
   border-radius: var(--r-sm);
-  background: var(--brand);
+  background: var(--glow-accent), var(--accent-fill);
   color: var(--surface);
   font-size: 13.5px;
   font-weight: 600;
 }
+
+.intel-form button:not(:disabled):hover { background: var(--accent-fill-hover); }
 
 .intel-form button:disabled { opacity: 0.45; cursor: default; }
 
@@ -1185,6 +1458,28 @@ button {
 .intel-more summary:hover { color: var(--brand); }
 .intel-more .intel-cites { margin-top: var(--s2); }
 
+/* Every panel opens with a secondary-colour edge: day groups, answers,
+   the extract panel and the assistant all read as one family. */
+.day-panel, .intel-answer, .x-panel {
+  border-top: 3px solid var(--brand-2);
+  box-shadow: var(--shadow);
+}
+
+/* The Intelligence page opens on a primary banner, like the overview tiles. */
+.intel-hero {
+  margin-bottom: var(--s4);
+  padding: var(--s5);
+  border-radius: var(--r);
+  background:
+    radial-gradient(90% 160% at 100% 0%, rgba(94, 158, 255, 0.5), transparent 58%),
+    radial-gradient(50% 120% at 0% 100%, rgba(254, 110, 6, 0.18), transparent 60%),
+    var(--brand);
+  box-shadow: var(--shadow), inset 0 -3px 0 var(--accent);
+}
+
+.intel-hero h2 { color: var(--surface); }
+.intel-hero p { margin-bottom: 0; color: var(--on-brand-soft); }
+
 /* ── Responsive ───────────────────────────────────────────────────────── */
 
 @media (max-width: 1100px) {
@@ -1209,7 +1504,7 @@ button {
   }
   .masthead { margin: 0 calc(var(--s4) * -1) var(--s4); padding: 0 var(--s4); }
   .masthead-left { gap: var(--s3); }
-  .wordmark span { display: none; }
+  .wordmark .wordmark-sub { display: none; }
   .intel-answer { padding: var(--s3) var(--s4) var(--s4); }
   .activity { display: none; }
   .shell[data-sidebar="open"] .rail { display: flex; }
@@ -1234,6 +1529,7 @@ button {
   .searchbar { top: 0; flex-wrap: wrap; }
   .x-form-foot { flex-direction: column; }
   .sidebar { position: static; max-height: none; margin-top: var(--s4); }
+  .sidebar-body { overflow: visible; }
 }
 
 @media (prefers-reduced-motion: reduce) {

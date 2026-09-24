@@ -65,7 +65,8 @@ function Masthead({
     <header className="masthead">
       <div className="masthead-left">
         <h1 className="wordmark">
-          Dealflow <span>India startup ecosystem</span>
+          <span className="brandmark" aria-hidden="true">G</span>
+          GPS <span className="wordmark-sub">Ganit Pursuit OS</span>
         </h1>
         <nav className="views" aria-label="Sections">
           <button aria-current={view === "feed" ? "page" : undefined} onClick={() => onView("feed")}>
@@ -187,6 +188,8 @@ function Entry({
 }) {
   const hue = categoryColor(article.category);
   const others = article.also_reported_by.length;
+  const justIn = article.published_at !== null &&
+    Date.now() - parseTime(article.published_at).getTime() < JUST_IN_MS;
 
   return (
     <article className="entry" data-selected={selected}>
@@ -197,6 +200,7 @@ function Entry({
       <div className="entry-body">
         {/* Where it was reported -- the attribution sits with the story. */}
         <div className="entry-kicker">
+          {justIn && <span className="just-in">Just in</span>}
           <span className="entry-source">{sourceLabel(article.source)}</span>
           {others > 0 && (
             <span
@@ -232,6 +236,8 @@ function Entry({
     </article>
   );
 }
+
+const JUST_IN_MS = 3 * 60 * 60 * 1000;
 
 /* ── App ───────────────────────────────────────────────────────────────── */
 
@@ -319,6 +325,8 @@ export default function App() {
     () => (activeDay ? articles.filter((a) => dayKey(a.published_at) === activeDay) : articles),
     [articles, activeDay],
   );
+
+  const todayKey = new Date().toLocaleDateString("en-CA", { timeZone: IST });
 
   const grouped = useMemo(() => {
     const groups: { key: string; label: string; items: Article[] }[] = [];
@@ -424,7 +432,7 @@ export default function App() {
             Extract from a URL
           </button>
           <button
-            className="ask-toggle"
+            className="ask-toggle ask-toggle--cta"
             aria-pressed={sidebarOpen}
             onClick={() => setSidebarOpen((open) => !open)}
           >
@@ -479,6 +487,7 @@ export default function App() {
           <section key={group.key}>
             <h2 className="daymark">
               {group.label}
+              {group.key === todayKey && <span className="today">Today</span>}
               <span className="n">
                 {group.items.length} {group.items.length === 1 ? "story" : "stories"}
               </span>

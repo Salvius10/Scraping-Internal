@@ -24,7 +24,7 @@ from .db import init_db
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
 app = FastAPI(
-    title="India Startup Ecosystem Dashboard",
+    title="GPS - Ganit Pursuit OS",
     version="0.1.0",
     description="Aggregated startup news with natural-language filtering.",
 )

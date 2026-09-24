@@ -1,4 +1,4 @@
-# Implementation — Dealflow
+# Implementation — GPS (Ganit Pursuit OS)
 
 A dashboard for the Indian startup ecosystem. It aggregates news from six
 sources, removes duplicate coverage, classifies every story, and lets a reader

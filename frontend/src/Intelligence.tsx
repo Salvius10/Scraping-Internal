@@ -213,7 +213,7 @@ export default function Intelligence() {
 
   return (
     <main className="intel" id="main">
-      <div className="intel-intro">
+      <div className="intel-intro intel-hero">
         <h2>Ask across all six sources</h2>
         <p>
           Each question searches Indian Startup News, Entrackr, Inc42, YourStory,
