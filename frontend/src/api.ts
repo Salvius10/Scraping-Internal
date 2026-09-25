@@ -87,10 +87,14 @@ export interface WebResult {
   title: string;
   description: string;
   domain: string;
+  published: string | null;   // as Firecrawl words it: "3 hours ago"
 }
+
+export type SearchKind = "news" | "web";
 
 export interface WebSearchResponse {
   query: string;
+  kind: SearchKind;
   searched: string | null;
   results: WebResult[];
   credits_used: number;
@@ -102,6 +106,7 @@ export interface ScrapeResponse {
   url: string;
   title: string | null;
   description: string | null;
+  published_at: string | null;
   summary: string | null;
   content: string | null;
   content_truncated: boolean;
@@ -128,6 +133,17 @@ export interface ExtractResponse {
   notes: string[];
   error: string | null;
   budget_remaining: number;
+}
+
+export interface Bucket {
+  key: string;
+  label: string;
+  note: string;
+  categories: Category[];
+  days: number;
+  count: number;
+  new_count: number;
+  latest_ingested_at: string | null;
 }
 
 export interface FeedQuery {
@@ -175,10 +191,15 @@ export const api = {
     tz_offset: -new Date().getTimezoneOffset(),
   }),
   status: () => get<Status>("/status"),
+  // seen: bucket key -> ISO time the reader last opened it, for "+N new".
+  buckets: (seen: Record<string, string>) =>
+    get<{ buckets: Bucket[] }>("/buckets", {
+      seen: Object.entries(seen).map(([key, at]) => `${key}@${at}`),
+    }),
   filter: (phrase: string) => post<FilterResponse>("/filter", { phrase }),
   chat: (request: ChatRequest) => post<ChatResponse>("/chat", request),
-  webSearch: (query: string) =>
-    post<WebSearchResponse>("/intelligence/search", { query }),
+  webSearch: (query: string, kind: SearchKind) =>
+    post<WebSearchResponse>("/intelligence/search", { query, kind }),
   scrapePage: (url: string, query: string) =>
     post<ScrapeResponse>("/intelligence/scrape", { url, query }),
   extract: (url: string, prompt: string) =>

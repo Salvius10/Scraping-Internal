@@ -5,7 +5,7 @@ import Intelligence from "./Intelligence";
 import Sidebar from "./Sidebar";
 import {
   api, categoryColor, categoryTextColor, parseTime, sourceLabel,
-  type ActivityDay, type Article, type Category, type Facets,
+  type ActivityDay, type Article, type Bucket, type Category, type Facets,
   type FilterSpec, type Status,
 } from "./api";
 
@@ -18,6 +18,22 @@ const timeFmt = new Intl.DateTimeFormat("en-IN", {
 const dayFmt = new Intl.DateTimeFormat("en-IN", {
   weekday: "short", day: "numeric", month: "short", timeZone: IST,
 });
+// The publisher's own timestamp, written out in full: "25 Sep 2026, 10:50".
+const publishedFmt = new Intl.DateTimeFormat("en-IN", {
+  day: "numeric", month: "short", year: "numeric",
+  hour: "2-digit", minute: "2-digit", hour12: false, timeZone: IST,
+});
+
+/** "2h ago", "3 days ago" -- for the hover title on a publish time. */
+function ago(date: Date): string {
+  const minutes = Math.max(0, Math.round((Date.now() - date.getTime()) / 60000));
+  if (minutes < 60) return `${Math.max(1, minutes)} min ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.round(hours / 24);
+  return `${days} day${days === 1 ? "" : "s"} ago`;
+}
+
 const shortDayFmt = new Intl.DateTimeFormat("en-IN", {
   day: "numeric", timeZone: IST,
 });
@@ -188,8 +204,8 @@ function Entry({
 }) {
   const hue = categoryColor(article.category);
   const others = article.also_reported_by.length;
-  const justIn = article.published_at !== null &&
-    Date.now() - parseTime(article.published_at).getTime() < JUST_IN_MS;
+  const published = article.published_at ? parseTime(article.published_at) : null;
+  const justIn = published !== null && Date.now() - published.getTime() < JUST_IN_MS;
 
   return (
     <article className="entry" data-selected={selected}>
@@ -202,6 +218,17 @@ function Entry({
         <div className="entry-kicker">
           {justIn && <span className="just-in">Just in</span>}
           <span className="entry-source">{sourceLabel(article.source)}</span>
+          {published ? (
+            <time
+              className="entry-published"
+              dateTime={published.toISOString()}
+              title={`Published on ${sourceLabel(article.source)}, ${ago(published)}`}
+            >
+              Published {publishedFmt.format(published)} IST
+            </time>
+          ) : (
+            <span className="entry-published">Publish time not given</span>
+          )}
           {others > 0 && (
             <span
               className="corroboration"
@@ -239,6 +266,76 @@ function Entry({
 
 const JUST_IN_MS = 3 * 60 * 60 * 1000;
 
+// How often the page checks whether the scheduler has refreshed the feed.
+// /api/status is a database read: free, no model call.
+const SYNC_MS = 60 * 1000;
+
+const SEEN_KEY = "gps.bucketSeen";
+
+/** When the reader last opened each bucket. Browser storage can be missing
+    (private windows, blocked storage), so every access is guarded. */
+function readSeen(): Record<string, string> {
+  try {
+    return JSON.parse(localStorage.getItem(SEEN_KEY) ?? "{}") as Record<string, string>;
+  } catch {
+    return {};
+  }
+}
+
+function writeSeen(seen: Record<string, string>) {
+  try {
+    localStorage.setItem(SEEN_KEY, JSON.stringify(seen));
+  } catch {
+    /* the badge simply resets next visit */
+  }
+}
+
+const sameSet = (a: readonly string[], b: readonly string[]) =>
+  a.length === b.length && a.every((v) => b.includes(v));
+
+/* ── Buckets ───────────────────────────────────────────────────────────── */
+
+function BucketBar({
+  buckets, active, onPick, onAll,
+}: {
+  buckets: Bucket[];
+  active: Bucket | null;
+  onPick: (bucket: Bucket) => void;
+  onAll: () => void;
+}) {
+  if (buckets.length === 0) return null;
+  return (
+    <div className="buckets">
+      <nav className="bucket-bar" aria-label="Buckets">
+        <button className="bucket" aria-pressed={active === null} onClick={onAll}>
+          All news
+        </button>
+        {buckets.map((bucket) => (
+          <button
+            key={bucket.key}
+            className="bucket"
+            data-key={bucket.key}
+            aria-pressed={active?.key === bucket.key}
+            title={bucket.note}
+            onClick={() => onPick(bucket)}
+          >
+            {bucket.label}
+            <span className="bucket-count">{bucket.count}</span>
+            {bucket.new_count > 0 && active?.key !== bucket.key && (
+              <span className="bucket-new">+{bucket.new_count} new</span>
+            )}
+          </button>
+        ))}
+      </nav>
+      {active && (
+        <p className="bucket-note">
+          {active.note}. {active.count} {active.count === 1 ? "story" : "stories"}.
+        </p>
+      )}
+    </div>
+  );
+}
+
 /* ── App ───────────────────────────────────────────────────────────────── */
 
 export default function App() {
@@ -264,8 +361,14 @@ export default function App() {
   const [selected, setSelected] = useState<Article | null>(null);
   const [filterNote, setFilterNote] = useState<string | null>(null);
   const [view, setView] = useState<View>(viewFromHash);
+  const [buckets, setBuckets] = useState<Bucket[]>([]);
+  const [seen, setSeen] = useState<Record<string, string>>(readSeen);
+  const [updateNote, setUpdateNote] = useState<string | null>(null);
 
   const offsetRef = useRef(0);
+  const statusRef = useRef<Status | null>(null);
+  const seenRef = useRef(seen);
+  seenRef.current = seen;
 
   // The section lives in the URL hash so a reload or a shared link keeps it.
   useEffect(() => {
@@ -281,11 +384,15 @@ export default function App() {
     setView(next);
   };
 
-  useEffect(() => {
-    api.status().then(setStatus).catch(() => undefined);
+  /** Everything around the feed that the scheduler can change. */
+  const loadMeta = useCallback(() => {
+    api.status().then((s) => { statusRef.current = s; setStatus(s); }).catch(() => undefined);
     api.facets().then(setFacets).catch(() => undefined);
     api.activity().then((r) => setActivity(r.days)).catch(() => undefined);
+    api.buckets(seenRef.current).then((r) => setBuckets(r.buckets)).catch(() => undefined);
   }, []);
+
+  useEffect(() => { loadMeta(); }, [loadMeta]);
 
   // Debounce typing so every keystroke is not a request.
   useEffect(() => {
@@ -320,6 +427,64 @@ export default function App() {
     offsetRef.current = 0;
     void load(false);
   }, [load]);
+
+  /* Stay in step with the 12-hour scheduler. Once a minute (and whenever the
+     tab comes back into view) ask when the feed was last refreshed; if that
+     moved, reload the buckets, counts and the current page of stories. */
+  useEffect(() => {
+    let stopped = false;
+
+    const check = async () => {
+      if (document.visibilityState !== "visible") return;
+      try {
+        const next = await api.status();
+        const prev = statusRef.current;
+        if (stopped || !prev || next.last_refresh === prev.last_refresh) return;
+        const added = next.article_count - prev.article_count;
+        loadMeta();
+        offsetRef.current = 0;
+        void load(false);
+        setUpdateNote(added > 0
+          ? `Feed updated: ${added} new ${added === 1 ? "story" : "stories"}`
+          : "Feed updated");
+      } catch {
+        /* the next tick tries again */
+      }
+    };
+
+    const timer = window.setInterval(check, SYNC_MS);
+    document.addEventListener("visibilitychange", check);
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", check);
+    };
+  }, [load, loadMeta]);
+
+  // A bucket is active exactly when the filters are its filters.
+  const activeBucket = useMemo(
+    () => buckets.find((b) =>
+      sameSet(b.categories, categories) && sources.length === 0 &&
+      !company && !query && (days === b.days || days === undefined)) ?? null,
+    [buckets, categories, sources, company, query, days],
+  );
+
+  const pickBucket = (bucket: Bucket) => {
+    if (activeBucket?.key === bucket.key) { showAll(); return; }
+    setCategories([...bucket.categories]);
+    setDays(bucket.days);
+    setSources([]); setCompany(undefined); setSearch(""); setActiveDay(null);
+    setFilterNote(null);
+    const next = { ...seen, [bucket.key]: new Date().toISOString() };
+    setSeen(next);
+    writeSeen(next);
+    setBuckets((prev) => prev.map((b) => (b.key === bucket.key ? { ...b, new_count: 0 } : b)));
+  };
+
+  const showAll = () => {
+    setCategories([]); setDays(undefined); setSources([]); setCompany(undefined);
+    setSearch(""); setActiveDay(null); setFilterNote(null);
+  };
 
   const visible = useMemo(
     () => (activeDay ? articles.filter((a) => dayKey(a.published_at) === activeDay) : articles),
@@ -439,6 +604,20 @@ export default function App() {
             {sidebarOpen ? "Hide assistant" : "Ask"}
           </button>
         </div>
+
+        <BucketBar
+          buckets={buckets}
+          active={activeBucket}
+          onPick={pickBucket}
+          onAll={showAll}
+        />
+
+        {updateNote && (
+          <p className="update-note" role="status">
+            {updateNote}
+            <button onClick={() => setUpdateNote(null)}>Dismiss</button>
+          </p>
+        )}
 
         {/* Kept mounted while hidden so results survive closing the panel. */}
         <div hidden={!extractOpen}>

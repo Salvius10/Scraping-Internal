@@ -50,6 +50,7 @@ SCRAPE_OK = {
 def _isolated(monkeypatch):
     monkeypatch.setattr(settings, "firecrawl_api_key", "fc-test")
     monkeypatch.setattr(settings, "firecrawl_api_url", "https://api.firecrawl.dev")
+    monkeypatch.setattr(intel, "published_fallback", lambda url: None)
     fc.clear_cache()
     intel.clear_cache()
     yield
@@ -91,13 +92,14 @@ def test_queries_are_steered_toward_startup_news(query, expected) -> None:
 
 def test_search_returns_results_without_scraping(monkeypatch) -> None:
     seen = serve(monkeypatch, ok(SEARCH_OK))
-    found = fc.search("Qzorbit")
+    found = fc.search("Qzorbit", kind="web")
 
     [request] = seen
     body = json.loads(request.content)
     assert request.url.path == "/v2/search"
     assert request.headers["authorization"] == "Bearer fc-test"
     assert body["query"] == "Qzorbit startup news"
+    assert body["sources"] == ["web"]
     assert "scrapeOptions" not in body          # results only, no page fetched
     assert [r.n for r in found.results] == [1, 2]            # bad URL dropped
     assert found.results[0].domain == "fundnews.test"
@@ -204,7 +206,8 @@ def test_search_endpoint_never_calls_the_model(monkeypatch) -> None:
     serve(monkeypatch, ok(SEARCH_OK))
     calls = _stub_model(monkeypatch, "unused")
     with TestClient(app) as client:
-        body = client.post("/api/intelligence/search", json={"query": "Qzorbit"}).json()
+        body = client.post("/api/intelligence/search",
+                           json={"query": "Qzorbit", "kind": "web"}).json()
     assert body["error"] is None and len(body["results"]) == 2
     assert body["searched"] == "Qzorbit startup news"
     assert calls == []
@@ -266,3 +269,87 @@ def test_markdown_snippets_become_plain_text() -> None:
     raw = "# Find Top Startups\n## Track new startups funded by [top investors](https://x.test) | **Series A**"
     assert fc.plain(raw) == "Find Top Startups Track new startups funded by top investors Series A"
     assert fc.plain("word " * 200).endswith("…") and len(fc.plain("word " * 200)) <= 321
+
+
+# --- Publish dates ------------------------------------------------------------------
+
+NEWS_OK = {
+    "success": True,
+    "creditsUsed": 2,
+    "data": {"news": [
+        {"url": "https://news.test/qzorbit-series-b", "title": "Qzorbit raises $40M",
+         "snippet": "The logistics startup closed a Series B.", "date": "3 hours ago",
+         "position": 1},
+        {"url": "https://news.test/older", "title": "Older story", "snippet": "x"},
+    ]},
+}
+
+
+def test_news_is_the_default_and_carries_publish_dates(monkeypatch) -> None:
+    seen = serve(monkeypatch, ok(NEWS_OK))
+    found = fc.search("Qzorbit")
+
+    assert json.loads(seen[0].content)["sources"] == ["news"]
+    assert found.kind == "news"
+    first, second = found.results
+    assert first.published == "3 hours ago"
+    assert first.description == "The logistics startup closed a Series B."  # snippet
+    assert second.published is None
+
+
+def test_news_and_web_are_cached_separately(monkeypatch) -> None:
+    seen = serve(monkeypatch, lambda r: httpx.Response(
+        200, json=NEWS_OK if json.loads(r.content)["sources"] == ["news"] else SEARCH_OK))
+    fc.search("Qzorbit", kind="news")
+    fc.search("Qzorbit", kind="web")
+    fc.search("Qzorbit", kind="news")
+    assert len(seen) == 2
+
+
+def test_unknown_kinds_are_refused(monkeypatch) -> None:
+    seen = serve(monkeypatch, ok(NEWS_OK))
+    with pytest.raises(fc.FirecrawlError):
+        fc.search("Qzorbit", kind="images")
+    assert seen == []
+
+
+def test_scrape_reads_the_publish_time_from_metadata(monkeypatch) -> None:
+    payload = json.loads(json.dumps(SCRAPE_OK))
+    payload["data"]["metadata"]["article:published_time"] = "2026-09-25T10:50:00+05:30"
+    serve(monkeypatch, ok(payload))
+    page, _ = fc.scrape("https://www.fundnews.test/qzorbit-raises-40m")
+    assert page.published_at.isoformat() == "2026-09-25T05:20:00+00:00"
+
+
+def test_scrape_endpoint_returns_the_exact_publish_time(monkeypatch) -> None:
+    payload = json.loads(json.dumps(SCRAPE_OK))
+    payload["data"]["metadata"]["publishedTime"] = "2026-09-25T05:20:00Z"
+    serve(monkeypatch, ok(payload))
+    _stub_model(monkeypatch, "- summary")
+    with TestClient(app) as client:
+        body = client.post("/api/intelligence/scrape", json={
+            "url": "https://www.fundnews.test/qzorbit-raises-40m"}).json()
+    assert body["published_at"].startswith("2026-09-25T05:20:00")
+
+
+def test_missing_metadata_date_falls_back_to_the_page(monkeypatch) -> None:
+    from datetime import datetime, timezone
+
+    serve(monkeypatch, ok(SCRAPE_OK))
+    _stub_model(monkeypatch, "- summary")
+    asked = []
+
+    def fallback(url):
+        asked.append(url)
+        return datetime(2026, 9, 24, 8, 0, tzinfo=timezone.utc)
+
+    monkeypatch.setattr(intel, "published_fallback", fallback)
+    with TestClient(app) as client:
+        body = client.post("/api/intelligence/scrape", json={
+            "url": "https://www.fundnews.test/qzorbit-raises-40m"}).json()
+    assert asked and body["published_at"].startswith("2026-09-24T08:00:00")
+
+
+def test_unreadable_dates_are_none_not_errors() -> None:
+    assert fc.published_from({"publishedTime": "not a date at all"}) is None
+    assert fc.published_from({}) is None

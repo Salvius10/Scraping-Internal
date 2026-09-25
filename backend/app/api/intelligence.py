@@ -18,6 +18,8 @@ import hashlib
 import logging
 import threading
 import time
+from datetime import datetime
+from typing import Literal
 
 from fastapi import APIRouter
 from pydantic import BaseModel
@@ -50,6 +52,7 @@ _summaries_lock = threading.Lock()
 
 class SearchRequest(BaseModel):
     query: str
+    kind: Literal["news", "web"] = "news"
 
 
 class ResultOut(BaseModel):
@@ -58,10 +61,12 @@ class ResultOut(BaseModel):
     title: str
     description: str
     domain: str
+    published: str | None = None
 
 
 class SearchResponse(BaseModel):
     query: str
+    kind: str = "news"
     searched: str | None = None
     results: list[ResultOut] = []
     credits_used: int = 0
@@ -72,12 +77,13 @@ class SearchResponse(BaseModel):
 @router.post("/search", response_model=SearchResponse)
 def search(request: SearchRequest) -> SearchResponse:
     try:
-        found = firecrawl.search(request.query)
+        found = firecrawl.search(request.query, kind=request.kind)
     except firecrawl.FirecrawlError as exc:
-        return SearchResponse(query=request.query, error=str(exc))
+        return SearchResponse(query=request.query, kind=request.kind, error=str(exc))
 
     return SearchResponse(
         query=found.query,
+        kind=found.kind,
         searched=found.searched,
         results=[ResultOut(**r.__dict__) for r in found.results],
         credits_used=found.credits_used,
@@ -96,6 +102,7 @@ class ScrapeResponse(BaseModel):
     url: str
     title: str | None = None
     description: str | None = None
+    published_at: datetime | None = None
     summary: str | None = None
     content: str | None = None
     content_truncated: bool = False
@@ -105,6 +112,22 @@ class ScrapeResponse(BaseModel):
     cached: bool = False
     error: str | None = None
     budget_remaining: float = 0.0
+
+
+def published_fallback(url: str) -> datetime | None:
+    """Read the publish time from the page itself when Firecrawl gave none.
+
+    Free: one guarded HTTP fetch (public addresses only, 3 MB cap), the same
+    one Extract uses, then the page's article:published_time meta tag. Never
+    raises -- a missing date is shown as "not given", not as an error.
+    """
+    try:
+        from ..extract import fetch_page
+        from ..ingest.describe import extract_meta
+        _, html = fetch_page(url)
+        return extract_meta(html).published_at
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def summary_prompt(page: firecrawl.Page, query: str | None) -> str:
@@ -139,6 +162,9 @@ def scrape(request: ScrapeRequest) -> ScrapeResponse:
     response.content = page.markdown[:MAX_SHOWN_CHARS]
     response.content_truncated = len(page.markdown) > MAX_SHOWN_CHARS
     response.credits_used = 0 if page_cached else page.credits_used
+    if page.published_at is None and not page_cached:
+        page.published_at = published_fallback(page.url)
+    response.published_at = page.published_at
 
     key = _summary_key(request.url, request.query)
     with _summaries_lock:

@@ -668,6 +668,25 @@ the filter back in plain language so the reader can see what was understood.
 Results are cached by `sha1(phrase.lower().strip())` in `FilterCache`, so the
 same phrase is **never recompiled**.
 
+#### `api/buckets.py` — buckets, kept in step with the scheduler
+
+`GET /api/buckets` returns fixed views of the recent feed, shown as a bar
+above the stories: **All news · Recently funded · Policy & regulation ·
+Market & analysis**. A bucket is a set of categories over a 7-day window. The
+definitions live only in `BUCKETS`, so adding one is a one-line change. Counts
+use the same rules as `/api/articles` (canonical stories, undated ones kept),
+and a test checks that a bucket's count equals what clicking it shows.
+
+**Sync:** the page polls `/api/status` once a minute, and again when the tab
+regains focus. When `last_refresh` moves, meaning the scheduler or a manual
+run ingested new stories, it reloads the buckets, facets, activity and the
+current page, then says how many stories arrived. Polling is a database read:
+free, with no model call.
+
+**"+N new":** the browser remembers when each bucket was last opened
+(`localStorage`, guarded for private windows). `?seen=key@time` asks the
+server how many stories *arrived* (`ingested_at`) since then.
+
 #### `api/intelligence.py` + `search/firecrawl.py`
 
 Intelligence is a web search for startup news, followed by a scrape of the
@@ -676,19 +695,24 @@ one result the reader chooses. It uses the hosted Firecrawl API
 self-hosted Firecrawl later, which needs no key.
 
 ```
-POST /api/intelligence/search {"query"}
+POST /api/intelligence/search {"query", "kind": "news" | "web"}
   steer()     adds "startup news" unless the query already names startups,
               funding, IPOs, founders, VCs or deals
   Firecrawl   /v2/search, web source, 10 results, NO scrapeOptions:
               pages are not fetched. 2 credits measured for 10 results
               (documented as 1). Cached 15 min.
-  → numbered results: title, url, description, domain
+  kind        "news" (default) or "web". News results carry a publish date
+              as Firecrawl words it ("3 hours ago"); web results carry none.
+  → numbered results: title, url, description, domain, published
 
 POST /api/intelligence/scrape {"url", "query"}
   Firecrawl   /v2/scrape, main content as markdown. 1 credit. Cached 1 h.
   gpt-oss     summary for the reader's query, first 20 K characters of the
               page (~$0.001), 3-6 bullets. Cached 1 h per page + query.
-  → summary + page content (first 30 K characters)
+  published   exact publish time from the page's metadata (publishedTime,
+              article:published_time, ...). If Firecrawl gives none, one free
+              guarded fetch of the page reads article:published_time itself.
+  → summary + page content (first 30 K characters) + published_at
 ```
 
 Nothing is read until the reader picks a result. A search makes no model call.
@@ -1018,7 +1042,7 @@ are recorded under `intelligence_summary`; Firecrawl credits are billed by Firec
 
 ## 8. Testing
 
-**198 tests, all offline — no test spends money.**
+**212 tests, all offline — no test spends money.**
 
 | File | Tests | Covers |
 |---|---|---|

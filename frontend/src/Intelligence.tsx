@@ -1,12 +1,15 @@
 import { useState } from "react";
 import CopyLink from "./CopyLink";
-import { api, type ScrapeResponse, type WebResult, type WebSearchResponse } from "./api";
+import {
+  api, parseTime, type ScrapeResponse, type SearchKind, type WebResult,
+  type WebSearchResponse,
+} from "./api";
 
-const EXAMPLES = [
-  "Recently funded fintech startups",
-  "Zepto IPO",
-  "Indian EV startups raising Series B",
-];
+// The publisher's own time, in full, once a page has been scraped.
+const publishedFmt = new Intl.DateTimeFormat("en-IN", {
+  day: "numeric", month: "short", year: "numeric",
+  hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata",
+});
 
 // Phosphor Icons (MIT), regular weight: "file-text" and "download-simple".
 const FILE_TEXT =
@@ -74,6 +77,9 @@ function ResultRow({
           <div className="fc-url">
             <span>{path}</span>
             <CopyLink url={result.url} />
+            {result.published && (
+              <span className="fc-published">Published {result.published}</span>
+            )}
           </div>
           {result.description && <p className="fc-desc">{result.description}</p>}
         </div>
@@ -97,6 +103,13 @@ function ResultRow({
 
       {data && (
         <div className="fc-scraped">
+          {!data.error || data.content ? (
+            <p className="fc-exact">
+              {data.published_at
+                ? `Published ${publishedFmt.format(parseTime(data.published_at))} IST`
+                : "Publish time not given on this page"}
+            </p>
+          ) : null}
           {data.summary && (
             <section>
               <h4>Summary</h4>
@@ -127,22 +140,23 @@ function ResultRow({
 
 export default function Intelligence() {
   const [query, setQuery] = useState("");
+  const [kind, setKind] = useState<SearchKind>("news");
   const [busy, setBusy] = useState(false);
   const [search, setSearch] = useState<WebSearchResponse | null>(null);
   const [view, setView] = useState<"results" | "json">("results");
   const [scrapes, setScrapes] = useState<Record<string, ScrapeState>>({});
 
-  async function run(text: string) {
+  async function run(text: string, as: SearchKind = kind) {
     const value = text.trim();
     if (!value || busy) return;
     setBusy(true);
     setScrapes({});
     try {
-      setSearch(await api.webSearch(value));
+      setSearch(await api.webSearch(value, as));
     } catch {
       setSearch({
-        query: value, searched: null, results: [], credits_used: 0, cached: false,
-        error: "Could not reach the server.",
+        query: value, kind: as, searched: null, results: [], credits_used: 0,
+        cached: false, error: "Could not reach the server.",
       });
     }
     setView("results");
@@ -157,7 +171,8 @@ export default function Intelligence() {
       data = await api.scrapePage(result.url, search?.query ?? "");
     } catch {
       data = {
-        url: result.url, title: null, description: null, summary: null, content: null,
+        url: result.url, title: null, description: null, published_at: null,
+        summary: null, content: null,
         content_truncated: false, model: null, cost_usd: 0, credits_used: 0,
         cached: false, error: "Could not reach the server.", budget_remaining: 0,
       };
@@ -204,15 +219,21 @@ export default function Intelligence() {
       </form>
 
       <div className="intel-controls">
-        <div className="chips">
-          {EXAMPLES.map((example) => (
+        <div className="fc-kind" role="radiogroup" aria-label="Search in">
+          {(["news", "web"] as const).map((k) => (
             <button
-              key={example}
-              className="chip"
+              key={k}
+              role="radio"
+              aria-checked={kind === k}
               disabled={busy}
-              onClick={() => { setQuery(example); void run(example); }}
+              onClick={() => {
+                if (k === kind) return;
+                setKind(k);
+                // Re-run the current search in the other mode.
+                if (search?.query) void run(search.query, k);
+              }}
             >
-              {example}
+              {k === "news" ? "News, with publish dates" : "Whole web"}
             </button>
           ))}
         </div>
