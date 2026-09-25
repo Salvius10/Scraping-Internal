@@ -176,7 +176,8 @@ def _key(*parts: str) -> str:
     return hashlib.sha1("\n".join(p.strip().lower() for p in parts).encode()).hexdigest()
 
 
-def search(query: str, limit: int | None = None, kind: str = "news") -> Search:
+def search(query: str, limit: int | None = None, kind: str = "news",
+           tbs: str | None = None, steered: bool = True) -> Search:
     """Search news or the web. Returns results only; nothing is scraped."""
     if kind not in KINDS:
         raise FirecrawlError("Choose News or Web.")
@@ -186,20 +187,23 @@ def search(query: str, limit: int | None = None, kind: str = "news") -> Search:
     if len(query) > 400:
         raise FirecrawlError("Keep the search under 400 characters.")
 
-    searched = steer(query)
+    searched = steer(query) if steered else query
     limit = limit or settings.firecrawl_search_limit
-    key = _key("search", kind, searched, str(limit))
+    key = _key("search", kind, searched, str(limit), tbs or "")
     hit = _cached(key)
     if hit is not None:
         return Search(**{**hit.__dict__, "query": query, "cached": True, "credits_used": 0})
 
-    payload = _post("/v2/search", {
+    body = {
         "query": searched,
         "limit": limit,
         "sources": [kind],
         "ignoreInvalidURLs": True,
         "timeout": int(settings.firecrawl_timeout * 1000),
-    })
+    }
+    if tbs:
+        body["tbs"] = tbs          # e.g. "cdr:1,cd_min:9/1/2026,cd_max:9/25/2026"
+    payload = _post("/v2/search", body)
 
     rows = (payload.get("data") or {}).get(kind) or []
     results: list[SearchResult] = []

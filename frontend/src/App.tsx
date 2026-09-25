@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import CopyLink from "./CopyLink";
 import ExtractPanel from "./ExtractPanel";
+import Insights from "./Insights";
 import Intelligence from "./Intelligence";
 import Sidebar from "./Sidebar";
 import {
@@ -8,6 +9,7 @@ import {
   type ActivityDay, type Article, type Bucket, type Category, type Facets,
   type FilterSpec, type Status,
 } from "./api";
+import { useRefreshSync } from "./useRefreshSync";
 
 const IST = "Asia/Kolkata";
 const PAGE = 30;
@@ -51,10 +53,12 @@ function describeAge(hours: number | null, interval: number): string {
   return `Refreshed ${days} day${days > 1 ? "s" : ""} ago (expected every ${interval}h)`;
 }
 
-type View = "feed" | "intelligence";
+type View = "feed" | "intelligence" | "insights";
 
 function viewFromHash(): View {
-  return window.location.hash === "#intelligence" ? "intelligence" : "feed";
+  if (window.location.hash === "#intelligence") return "intelligence";
+  if (window.location.hash === "#insights") return "insights";
+  return "feed";
 }
 
 /* ── Masthead ──────────────────────────────────────────────────────────── */
@@ -93,6 +97,12 @@ function Masthead({
             onClick={() => onView("intelligence")}
           >
             Intelligence
+          </button>
+          <button
+            aria-current={view === "insights" ? "page" : undefined}
+            onClick={() => onView("insights")}
+          >
+            Insights
           </button>
         </nav>
       </div>
@@ -266,10 +276,6 @@ function Entry({
 
 const JUST_IN_MS = 3 * 60 * 60 * 1000;
 
-// How often the page checks whether the scheduler has refreshed the feed.
-// /api/status is a database read: free, no model call.
-const SYNC_MS = 60 * 1000;
-
 const SEEN_KEY = "gps.bucketSeen";
 
 /** When the reader last opened each bucket. Browser storage can be missing
@@ -366,7 +372,6 @@ export default function App() {
   const [updateNote, setUpdateNote] = useState<string | null>(null);
 
   const offsetRef = useRef(0);
-  const statusRef = useRef<Status | null>(null);
   const seenRef = useRef(seen);
   seenRef.current = seen;
 
@@ -379,14 +384,14 @@ export default function App() {
 
   const showView = (next: View) => {
     if (next === viewFromHash()) return;
-    if (next === "intelligence") window.location.hash = "intelligence";
+    if (next !== "feed") window.location.hash = next;
     else window.history.pushState(null, "", window.location.pathname + window.location.search);
     setView(next);
   };
 
   /** Everything around the feed that the scheduler can change. */
   const loadMeta = useCallback(() => {
-    api.status().then((s) => { statusRef.current = s; setStatus(s); }).catch(() => undefined);
+    api.status().then(setStatus).catch(() => undefined);
     api.facets().then(setFacets).catch(() => undefined);
     api.activity().then((r) => setActivity(r.days)).catch(() => undefined);
     api.buckets(seenRef.current).then((r) => setBuckets(r.buckets)).catch(() => undefined);
@@ -428,38 +433,17 @@ export default function App() {
     void load(false);
   }, [load]);
 
-  /* Stay in step with the 12-hour scheduler. Once a minute (and whenever the
-     tab comes back into view) ask when the feed was last refreshed; if that
-     moved, reload the buckets, counts and the current page of stories. */
-  useEffect(() => {
-    let stopped = false;
-
-    const check = async () => {
-      if (document.visibilityState !== "visible") return;
-      try {
-        const next = await api.status();
-        const prev = statusRef.current;
-        if (stopped || !prev || next.last_refresh === prev.last_refresh) return;
-        const added = next.article_count - prev.article_count;
-        loadMeta();
-        offsetRef.current = 0;
-        void load(false);
-        setUpdateNote(added > 0
-          ? `Feed updated: ${added} new ${added === 1 ? "story" : "stories"}`
-          : "Feed updated");
-      } catch {
-        /* the next tick tries again */
-      }
-    };
-
-    const timer = window.setInterval(check, SYNC_MS);
-    document.addEventListener("visibilitychange", check);
-    return () => {
-      stopped = true;
-      window.clearInterval(timer);
-      document.removeEventListener("visibilitychange", check);
-    };
-  }, [load, loadMeta]);
+  /* Stay in step with the 12-hour scheduler: when new stories land, reload
+     the buckets, counts and the current page of stories. */
+  useRefreshSync((next, prev) => {
+    const added = next.article_count - prev.article_count;
+    loadMeta();
+    offsetRef.current = 0;
+    void load(false);
+    setUpdateNote(added > 0
+      ? `Feed updated: ${added} new ${added === 1 ? "story" : "stories"}`
+      : "Feed updated");
+  });
 
   // A bucket is active exactly when the filters are its filters.
   const activeBucket = useMemo(
@@ -540,6 +524,23 @@ export default function App() {
 
   const toggle = <T,>(list: T[], value: T) =>
     list.includes(value) ? list.filter((v) => v !== value) : [...list, value];
+
+  if (view === "insights") {
+    return (
+      <div className="shell" data-view="insights">
+        <a className="skip-link" href="#main">Skip to content</a>
+        <Masthead
+          status={status}
+          activity={activity}
+          activeDay={activeDay}
+          onPickDay={setActiveDay}
+          view={view}
+          onView={showView}
+        />
+        <Insights />
+      </div>
+    );
+  }
 
   if (view === "intelligence") {
     return (

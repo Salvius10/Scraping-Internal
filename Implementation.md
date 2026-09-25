@@ -668,6 +668,53 @@ the filter back in plain language so the reader can see what was understood.
 Results are cached by `sha1(phrase.lower().strip())` in `FilterCache`, so the
 same phrase is **never recompiled**.
 
+#### `api/insights.py` + `ingest/rounds.py` — Insights: startup funding
+
+A third section in the navbar, **Insights**, with its own side menu: **Startup
+firms** (built), **VC firms** and **Events organised** (placeholders, planned).
+
+Startup firms lists every company that raised money, newest first, in tabs:
+**Pre-Seed · Seed · Series A · Series B · Other rounds**. Each row shows
+company, round, investors, amount, publish time (IST) and source. Other rounds
+holds Series C and later, debt, IPO anchor money and non-startup investment,
+so no funding story is hidden. Pre-Series A and bridge rounds sit under Seed
+and keep their exact name in the Round column.
+
+```
+ingest/rounds.py  after enrich + dedupe in every refresh (so the scheduler
+                  drives it): canonical Funding stories without a row yet
+                  -> gpt-oss, 20 per call, ~$0.00005 each -> funding_rounds
+                  stage validated to the 5 tabs; "undisclosed"/"N/A" dropped;
+                  a story the model skipped stays pending, never stored empty
+GET /api/insights/rounds?stage=seed      one tab, newest first + all counts
+GET /api/insights/rounds.xlsx?stage=...  same rows as Excel (openpyxl);
+                                         no stage = one sheet per stage
+```
+
+**Date filter:** `start` and `end` (YYYY-MM-DD, inclusive, Indian days) on
+the publish time, on both endpoints. The page has presets (Last 7 / 30 / 90
+days, All time) plus From/To pickers; any change reloads at once. Tab counts
+and both Excel downloads follow the range, and undated stories appear only
+under All time.
+
+**Search web** (`ingest/web_rounds.py`, `POST /api/insights/search-web`):
+on demand, for the From/To dates chosen. Four Firecrawl news searches, one
+per stage, restricted to the range with Google's custom-date filter (`tbs
+cdr:1,...`); results only, no page scraped. gpt-oss reads each result's title
+and snippet (20 per call) for company, round, stage, amount and investors.
+Kept only if it is a Pre-Seed to Series B round inside the range and not
+already known (same company and stage within 14 days, from the feed or an
+earlier search). Every result read is recorded in `web_rounds` (`kept` false
+for rejects), so none is read twice. Web rounds join the tabs, counts and
+Excel ("Found via: Web search"), never the news feed. Relative dates ("3 days
+ago") are marked approximate and shown as a day only. Cost per click: about
+8-16 Firecrawl credits and ~$0.003; a failed query is reported, not fatal.
+
+Excel columns: Company, Stage, Round, Investors, Amount, Published (IST, a
+real Excel date), Source, Headline, Link (clickable), with a frozen, filterable
+header. The page follows the scheduler through the same shared hook as the
+feed (`useRefreshSync`), and reloads when new stories land.
+
 #### `api/buckets.py` — buckets, kept in step with the scheduler
 
 `GET /api/buckets` returns fixed views of the recent feed, shown as a bar
@@ -1042,7 +1089,7 @@ are recorded under `intelligence_summary`; Firecrawl credits are billed by Firec
 
 ## 8. Testing
 
-**212 tests, all offline — no test spends money.**
+**250 tests, all offline — no test spends money.**
 
 | File | Tests | Covers |
 |---|---|---|

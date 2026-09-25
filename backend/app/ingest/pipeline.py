@@ -149,6 +149,7 @@ class RefreshResult:
     described: int | None = None       # None when the step was skipped
     enrich: object | None = None       # EnrichResult, or None when skipped
     merged: int | None = None
+    rounds: object | None = None       # RoundsResult, or None when skipped
     chunks_synced: int = 0
 
     @property
@@ -177,6 +178,11 @@ def refresh(
         from .dedupe import dedupe_by_company
         with session_scope() as s:
             result.merged = dedupe_by_company(s)
+
+        # Funding-round details for Insights, after dedupe so only one copy of
+        # each story is read. Paid, batched, only new Funding stories.
+        from .rounds import extract_pending
+        result.rounds = extract_pending()
 
     # Belt and braces: citations must quote what is stored. Free.
     from .chunks import sync_all_chunks
@@ -259,6 +265,9 @@ def main(argv: list[str] | None = None) -> int:
             print("          stopped early: %s" % e.stopped_reason[:90])
         print("dedupe:   %d further duplicates merged by company (free)"
               % result.merged)
+        r = result.rounds
+        print("rounds:   %d/%d funding stories read for Insights, $%.6f"
+              % (r.extracted, r.considered, r.cost_usd))
 
     if result.chunks_synced:
         print("chunks:   %d citation passages brought up to date (free)"

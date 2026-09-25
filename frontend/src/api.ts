@@ -146,6 +146,52 @@ export interface Bucket {
   latest_ingested_at: string | null;
 }
 
+export type StageKey = "pre-seed" | "seed" | "series-a" | "series-b" | "other";
+
+export interface FundingRound {
+  id: string;
+  company: string | null;
+  stage: string;
+  round: string | null;
+  amount: string | null;
+  investors: string[];
+  published_at: string | null;
+  source: string;
+  source_label: string;
+  headline: string;
+  url: string;
+  origin: "feed" | "web";
+  date_approx: boolean;
+}
+
+export interface SearchWebResponse {
+  start: string | null;
+  end: string | null;
+  results_seen: number;
+  added: Record<string, number>;
+  total_added: number;
+  duplicates: number;
+  outside_range: number;
+  not_startup_rounds: number;
+  credits_used: number;
+  cost_usd: number;
+  failed_queries: string[];
+  error: string | null;
+}
+
+/** Publish-date range, YYYY-MM-DD in Indian days; either end may be open. */
+export interface DateRange {
+  start?: string;
+  end?: string;
+}
+
+export interface RoundsResponse {
+  stage: StageKey;
+  stages: { key: StageKey; label: string; count: number }[];
+  rounds: FundingRound[];
+  pending: number;
+}
+
 export interface FeedQuery {
   limit?: number;
   offset?: number;
@@ -198,6 +244,19 @@ export const api = {
     }),
   filter: (phrase: string) => post<FilterResponse>("/filter", { phrase }),
   chat: (request: ChatRequest) => post<ChatResponse>("/chat", request),
+  searchWebRounds: (start: string, end?: string) =>
+    post<SearchWebResponse>("/insights/search-web", { start, end: end || undefined }),
+  rounds: (stage: StageKey, range: DateRange = {}) =>
+    get<RoundsResponse>("/insights/rounds", { stage, ...range }),
+  // A plain link, so the browser handles the file download itself.
+  roundsExcelUrl: (stage?: StageKey, range: DateRange = {}) => {
+    const params = new URLSearchParams();
+    if (stage) params.set("stage", stage);
+    if (range.start) params.set("start", range.start);
+    if (range.end) params.set("end", range.end);
+    const query = params.toString();
+    return `/api/insights/rounds.xlsx${query ? `?${query}` : ""}`;
+  },
   webSearch: (query: string, kind: SearchKind) =>
     post<WebSearchResponse>("/intelligence/search", { query, kind }),
   scrapePage: (url: string, query: string) =>

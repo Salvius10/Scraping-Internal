@@ -17,7 +17,9 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import scheduler
-from .api import buckets, chat, extract, feed, filter as filter_api, intelligence, status
+from .api import (
+    buckets, chat, extract, feed, filter as filter_api, insights, intelligence, status,
+)
 from .config import BACKEND_DIR, settings
 from .db import init_db
 
@@ -40,6 +42,7 @@ app.add_middleware(
 
 app.include_router(feed.router)
 app.include_router(buckets.router)
+app.include_router(insights.router)
 app.include_router(status.router)
 app.include_router(filter_api.router)
 app.include_router(chat.router)

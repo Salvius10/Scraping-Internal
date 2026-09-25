@@ -21,5 +21,8 @@ boto3==1.43.100
 # Paid extraction path -- VCCircle only, the single feedless source
 scrapegraphai==2.2.4
 
+# Insights: funding rounds downloaded as Excel
+openpyxl==3.1.5
+
 # Dev
 pytest==8.4.2

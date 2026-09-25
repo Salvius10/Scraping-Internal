@@ -83,10 +83,11 @@ def refresh_job() -> None:
         e = result.enrich
         log.info(
             "scheduler: refresh done -- %d sources (%d failed), %d new, "
-            "%s described, %s enriched ($%.6f), %s merged",
+            "%s described, %s enriched ($%.6f), %s merged, %s rounds read",
             len(result.runs), sum(1 for r in result.runs if r.error),
             sum(r.items_new for r in result.runs), result.described,
             getattr(e, "updated", 0), getattr(e, "cost_usd", 0.0), result.merged,
+            getattr(result.rounds, "extracted", 0),
         )
     except Exception:  # noqa: BLE001 - log and wait for the next interval
         log.exception("scheduler: refresh failed")

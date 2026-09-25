@@ -77,6 +77,18 @@ class Category(str, enum.Enum):
     OTHER = "Other"
 
 
+class Stage(str, enum.Enum):
+    """The Insights tabs. Anything that is not one of the four named stages --
+    Series C and later, debt, IPO anchor money, undisclosed -- is OTHER, so no
+    funding story is hidden. The exact round name is kept separately."""
+
+    PRE_SEED = "Pre-Seed"
+    SEED = "Seed"
+    SERIES_A = "Series A"
+    SERIES_B = "Series B"
+    OTHER = "Other"
+
+
 class DescriptionOrigin(str, enum.Enum):
     META = "meta"            # taken from the page's own og:description
     FEED = "feed"            # taken from the RSS item
@@ -195,6 +207,62 @@ class IngestRun(Base):
     @property
     def window_overflowed(self) -> bool:
         return self.items_seen > 0 and self.items_new == self.items_seen
+
+
+class FundingRound(Base):
+    """One funding round, pulled out of a Funding story by gpt-oss.
+
+    One row per canonical story; the publish time, outlet and link come from
+    the article itself. `extracted_at` is set even when a story turns out not to
+    describe a round, so it is never paid for twice.
+    """
+
+    __tablename__ = "funding_rounds"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    article_id: Mapped[int] = mapped_column(
+        ForeignKey("articles.id", ondelete="CASCADE"), unique=True, index=True
+    )
+    company: Mapped[str | None] = mapped_column(String(200), default=None)
+    stage: Mapped[Stage] = mapped_column(Enum(Stage), index=True, default=Stage.OTHER)
+    round_label: Mapped[str | None] = mapped_column(String(80), default=None)
+    amount: Mapped[str | None] = mapped_column(String(120), default=None)
+    investors: Mapped[str | None] = mapped_column(Text, default=None)
+    extracted_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
+
+    article: Mapped[Article] = relationship()
+
+
+class WebRound(Base):
+    """A funding round found by searching the web from Insights ("Search web").
+
+    Kept apart from `articles`, so web finds never enter the news feed. Each
+    row carries its own link, headline and publish time. `date_approx` is set
+    when the time came from a phrase like "3 days ago" rather than a stamp.
+
+    Every result the model reads gets a row, shown or not: `kept` is False for
+    results that were not a startup round in the four stages, or repeated a
+    round already known. That is what stops a second search paying to read
+    the same result again.
+    """
+
+    __tablename__ = "web_rounds"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    url: Mapped[str] = mapped_column(String(1000), unique=True, index=True)
+    headline: Mapped[str] = mapped_column(Text)
+    domain: Mapped[str] = mapped_column(String(200))
+    snippet: Mapped[str | None] = mapped_column(Text, default=None)
+    published_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), index=True,
+                                                          default=None)
+    date_approx: Mapped[bool] = mapped_column(default=False)
+    company: Mapped[str | None] = mapped_column(String(200), default=None)
+    stage: Mapped[Stage] = mapped_column(Enum(Stage), index=True)
+    round_label: Mapped[str | None] = mapped_column(String(80), default=None)
+    amount: Mapped[str | None] = mapped_column(String(120), default=None)
+    investors: Mapped[str | None] = mapped_column(Text, default=None)
+    kept: Mapped[bool] = mapped_column(default=True, index=True)
+    found_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
 
 
 class FilterCache(Base):
