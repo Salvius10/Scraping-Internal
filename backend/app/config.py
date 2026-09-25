@@ -29,9 +29,15 @@ class Settings(BaseSettings):
     # by `python -m app.scheduler` or by hand, so two processes do not race.
     scheduler_enabled: bool = True
 
-    # --- Intelligence (real-time search of our own six sources) ---
-    live_search_timeout: float = 8.0  # per source; a slow site is dropped
-    live_search_ttl: int = 600        # seconds a live result is reused
+    # --- Intelligence: web search + on-demand scrape via hosted Firecrawl ---
+    # Firecrawl bills in its own credits, separate from the $7 LLM cap: a
+    # search of 10 results measured 2 credits, a scrape 1 per page. Set the
+    # key in .env (gitignored). The URL can later point at a self-hosted
+    # Firecrawl, which needs no key.
+    firecrawl_api_key: str | None = None
+    firecrawl_api_url: str = "https://api.firecrawl.dev"
+    firecrawl_timeout: float = 45.0
+    firecrawl_search_limit: int = 10
 
     # --- HTTP ---
     user_agent: str = (

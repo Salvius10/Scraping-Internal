@@ -1,242 +1,205 @@
-import { useState, type ReactNode } from "react";
+import { useState } from "react";
 import CopyLink from "./CopyLink";
-import {
-  api, categoryTextColor, parseTime, sourceLabel,
-  type Citation, type IntelligenceResponse, type SourceStatus,
-} from "./api";
+import { api, type ScrapeResponse, type WebResult, type WebSearchResponse } from "./api";
 
 const EXAMPLES = [
-  "What is happening with Zepto's IPO?",
-  "Which startups raised funding this week?",
-  "Any layoffs or shutdowns recently?",
+  "Recently funded fintech startups",
+  "Zepto IPO",
+  "Indian EV startups raising Series B",
 ];
 
-const dateFmt = new Intl.DateTimeFormat("en-IN", {
-  day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata",
-});
+// Phosphor Icons (MIT), regular weight: "file-text" and "download-simple".
+const FILE_TEXT =
+  "M213.66,82.34l-56-56A8,8,0,0,0,152,24H56A16,16,0,0,0,40,40V216a16,16,0,0,0,16,16H200a16,16,0,0,0,16-16V88A8,8,0,0,0,213.66,82.34ZM160,51.31,188.69,80H160ZM200,216H56V40h88V88a8,8,0,0,0,8,8h48V216Zm-32-80a8,8,0,0,1-8,8H96a8,8,0,0,1,0-16h64A8,8,0,0,1,168,136Zm0,32a8,8,0,0,1-8,8H96a8,8,0,0,1,0-16h64A8,8,0,0,1,168,168Z";
+const DOWNLOAD =
+  "M224,144v64a8,8,0,0,1-8,8H40a8,8,0,0,1-8-8V144a8,8,0,0,1,16,0v56H208V144a8,8,0,0,1,16,0Zm-101.66,5.66a8,8,0,0,0,11.32,0l40-40a8,8,0,0,0-11.32-11.32L136,124.69V32a8,8,0,0,0-16,0v92.69L93.66,98.34a8,8,0,0,0-11.32,11.32Z";
 
-type Entry = IntelligenceResponse & { key: number };
-
-const CITE = /\[(\d+(?:\s*[,–-]\s*\d+)*)\]/g;
-
-/** Numbers inside one bracket group: "2", "1, 4", "2-4". */
-function expand(group: string): number[] {
-  const out: number[] = [];
-  for (const part of group.split(/\s*,\s*/)) {
-    const [lo, hi = lo] = part.split(/\s*[–-]\s*/).map(Number);
-    if (Number.isFinite(lo) && Number.isFinite(hi) && hi - lo <= 20) {
-      for (let n = lo; n <= hi; n++) out.push(n);
-    }
-  }
-  return out;
-}
-
-/** One line of the answer, with [n] markers turned into footnote links. */
-function withCitations(line: string, entryKey: number, valid: Set<number>): ReactNode[] {
-  const nodes: ReactNode[] = [];
-  let last = 0;
-  for (const match of line.matchAll(CITE)) {
-    nodes.push(line.slice(last, match.index));
-    for (const n of expand(match[1])) {
-      nodes.push(
-        valid.has(n) ? (
-          <a key={`${match.index}-${n}`} className="cite" href={`#cite-${entryKey}-${n}`}>
-            {n}
-          </a>
-        ) : null,
-      );
-    }
-    last = (match.index ?? 0) + match[0].length;
-  }
-  nodes.push(line.slice(last));
-  return nodes;
-}
-
-function Prose({ entry }: { entry: Entry }) {
-  const valid = new Set(entry.citations.map((c) => c.n));
+function Icon({ d }: { d: string }) {
   return (
-    <div className="intel-prose">
-      {(entry.answer ?? "").split("\n").filter((l) => l.trim()).map((raw, i) => {
+    <svg viewBox="0 0 256 256" width="15" height="15" fill="currentColor" aria-hidden="true">
+      <path d={d} />
+    </svg>
+  );
+}
+
+/* A site's initial on one of the four brand colours, chosen by its name so
+   the same site always gets the same badge. No third-party favicon calls. */
+const BADGES = ["brand", "brand-2", "accent", "wash"] as const;
+function badgeTone(domain: string) {
+  let hash = 0;
+  for (const ch of domain) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
+  return BADGES[hash % BADGES.length];
+}
+
+/** Model output is light markdown: keep bullets, drop the markup. */
+function Summary({ text }: { text: string }) {
+  return (
+    <div className="fc-summary-text">
+      {text.split("\n").filter((l) => l.trim()).map((raw, i) => {
         const bullet = /^\s*[-*•]\s+/.test(raw);
         const line = raw.replace(/^\s*[-*•]\s+/, "").replace(/\*\*/g, "").replace(/^#+\s*/, "");
-        return (
-          <p key={i} className={bullet ? "answer-bullet" : "answer-line"}>
-            {withCitations(line, entry.key, valid)}
-          </p>
-        );
+        return <p key={i} className={bullet ? "answer-bullet" : "answer-line"}>{line}</p>;
       })}
     </div>
   );
 }
 
-function statusText(s: SourceStatus): string {
-  switch (s.status) {
-    case "ok": return `${s.found} found${s.new ? `, ${s.new} new` : ""}`;
-    case "empty": return "nothing";
-    case "timeout": return "timed out";
-    case "error": return "unreachable";
-    default: return "not searched";
-  }
-}
+type ScrapeState = { busy: boolean; data?: ScrapeResponse };
 
-function Sources({ sources }: { sources: SourceStatus[] }) {
-  if (sources.length === 0) return null;
-  return (
-    <ul className="intel-sources" aria-label="Sources searched live">
-      {sources.map((s) => (
-        <li
-          key={s.name}
-          data-status={s.status}
-          title={s.error ?? (s.cached ? "Reused from a search in the last 10 minutes" : undefined)}
-        >
-          <span className="intel-source-name">{s.label}</span>
-          {statusText(s)}
-        </li>
-      ))}
-    </ul>
-  );
-}
+function ResultRow({
+  result, scrape, onScrape,
+}: {
+  result: WebResult;
+  scrape: ScrapeState | undefined;
+  onScrape: () => void;
+}) {
+  const data = scrape?.data;
+  let path = result.url;
+  try {
+    const u = new URL(result.url);
+    path = `${result.domain}${u.pathname === "/" ? "" : u.pathname}${u.search}`;
+  } catch { /* keep raw */ }
 
-function CitationItem({ citation, entryKey }: { citation: Citation; entryKey: number }) {
-  const meta = [
-    sourceLabel(citation.source),
-    citation.published_at ? dateFmt.format(parseTime(citation.published_at)) : null,
-  ].filter(Boolean).join(" · ");
   return (
-    <li id={`cite-${entryKey}-${citation.n}`} className="intel-cite">
-      <span className="intel-cite-n">{citation.n}</span>
-      <div className="intel-cite-body">
-        <a href={citation.url} target="_blank" rel="noreferrer noopener">
-          {citation.headline}
-        </a>
-        <div className="intel-cite-meta">
-          {meta}
-          {citation.category && (
-            <span style={{ color: categoryTextColor(citation.category) }}>
-              {citation.category}
-            </span>
-          )}
-          {citation.discovered && (
-            <span className="intel-new" title="Found by this search; now in the feed too">
-              new
-            </span>
-          )}
-          <CopyLink url={citation.url} />
+    <li className="fc-result">
+      <div className="fc-result-main">
+        <span className="fc-badge" data-tone={badgeTone(result.domain)} aria-hidden="true">
+          {result.domain.charAt(0).toUpperCase()}
+        </span>
+        <div className="fc-result-body">
+          <h3 className="fc-title">
+            <span className="fc-rank">#{result.n}</span>
+            <a href={result.url} target="_blank" rel="noreferrer noopener">{result.title}</a>
+          </h3>
+          <div className="fc-url">
+            <span>{path}</span>
+            <CopyLink url={result.url} />
+          </div>
+          {result.description && <p className="fc-desc">{result.description}</p>}
         </div>
+        <button
+          className="fc-scrape"
+          onClick={onScrape}
+          disabled={scrape?.busy}
+          aria-expanded={Boolean(data)}
+        >
+          <Icon d={FILE_TEXT} />
+          {scrape?.busy ? "Scraping" : data ? "Scraped" : "Scrape page"}
+        </button>
       </div>
+
+      {scrape?.busy && (
+        <div className="fc-scraping" aria-live="polite">
+          <span className="pulse" />
+          Reading this page and writing a summary
+        </div>
+      )}
+
+      {data && (
+        <div className="fc-scraped">
+          {data.summary && (
+            <section>
+              <h4>Summary</h4>
+              <Summary text={data.summary} />
+            </section>
+          )}
+          {data.error && <p className="answer-error">{data.error}</p>}
+          {data.content && (
+            <details className="fc-content">
+              <summary>
+                Page content{data.content_truncated ? " (first part)" : ""}
+              </summary>
+              <pre>{data.content}</pre>
+            </details>
+          )}
+          {!data.error && (
+            <p className="answer-meta">
+              {data.cached
+                ? "Reused, no credits or budget spent"
+                : `${data.credits_used} Firecrawl credit${data.credits_used === 1 ? "" : "s"}, $${data.cost_usd.toFixed(6)} for the summary`}
+            </p>
+          )}
+        </div>
+      )}
     </li>
   );
 }
 
-function Answer({ entry }: { entry: Entry }) {
-  const cited = entry.citations.filter((c) => c.cited);
-  const rest = entry.citations.filter((c) => !c.cited);
-  // Without an answer (budget spent, model down) every match is the result.
-  const primary = entry.answer ? cited : entry.citations;
-  const secondary = entry.answer ? rest : [];
-
-  return (
-    <article className="intel-answer">
-      <h3 className="intel-q">{entry.question}</h3>
-      {entry.search && (
-        <p className="intel-plan">
-          Searched for “{entry.search}”
-          {entry.since_days ? ` in the last ${entry.since_days} days` : ""}
-          {entry.terms.length > 0 && `. Keywords: ${entry.terms.join(", ")}`}
-        </p>
-      )}
-
-      {entry.error && <p className="answer-error">{entry.error}</p>}
-      {entry.answer && <Prose entry={entry} />}
-
-      <Sources sources={entry.sources} />
-
-      {primary.length > 0 && (
-        <>
-          <h4 className="intel-list-head">
-            {entry.answer ? "Sources cited" : "Matching stories"}
-          </h4>
-          <ol className="intel-cites">
-            {primary.map((c) => <CitationItem key={c.n} citation={c} entryKey={entry.key} />)}
-          </ol>
-        </>
-      )}
-
-      {secondary.length > 0 && (
-        <details className="intel-more">
-          <summary>Also retrieved, not cited ({secondary.length})</summary>
-          <ol className="intel-cites">
-            {secondary.map((c) => <CitationItem key={c.n} citation={c} entryKey={entry.key} />)}
-          </ol>
-        </details>
-      )}
-
-      {entry.answer && entry.model && (
-        <p className="answer-meta">
-          {entry.model.includes("sonnet") ? "Sonnet 4.6" : "gpt-oss"} · $
-          {entry.cost_usd.toFixed(6)}
-          {entry.plan_cached ? " (search plan reused)" : ""}
-        </p>
-      )}
-    </article>
-  );
-}
-
 export default function Intelligence() {
-  const [question, setQuestion] = useState("");
-  const [live, setLive] = useState(true);
-  const [premium, setPremium] = useState(false);
+  const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
-  const [log, setLog] = useState<Entry[]>([]);
+  const [search, setSearch] = useState<WebSearchResponse | null>(null);
+  const [view, setView] = useState<"results" | "json">("results");
+  const [scrapes, setScrapes] = useState<Record<string, ScrapeState>>({});
 
-  async function ask(text: string) {
+  async function run(text: string) {
     const value = text.trim();
     if (!value || busy) return;
     setBusy(true);
-    let result: IntelligenceResponse;
+    setScrapes({});
     try {
-      result = await api.intelligence({ question: value, live, premium });
+      setSearch(await api.webSearch(value));
     } catch {
-      result = {
-        question: value, answer: null, model: null, search: null, terms: [],
-        since_days: null, citations: [], sources: [], cost_usd: 0,
-        plan_cached: false, error: "Could not reach the server.",
-        budget_remaining: 0,
-      };
+      setSearch({
+        query: value, searched: null, results: [], credits_used: 0, cached: false,
+        error: "Could not reach the server.",
+      });
     }
-    setLog((prev) => [{ ...result, key: Date.now() }, ...prev]);
+    setView("results");
     setBusy(false);
-    setQuestion("");
   }
 
-  const spent = log.reduce((sum, e) => sum + e.cost_usd, 0);
+  async function scrapeOne(result: WebResult) {
+    if (scrapes[result.url]?.busy || scrapes[result.url]?.data) return;
+    setScrapes((prev) => ({ ...prev, [result.url]: { busy: true } }));
+    let data: ScrapeResponse;
+    try {
+      data = await api.scrapePage(result.url, search?.query ?? "");
+    } catch {
+      data = {
+        url: result.url, title: null, description: null, summary: null, content: null,
+        content_truncated: false, model: null, cost_usd: 0, credits_used: 0,
+        cached: false, error: "Could not reach the server.", budget_remaining: 0,
+      };
+    }
+    setScrapes((prev) => ({ ...prev, [result.url]: { busy: false, data } }));
+  }
+
+  function downloadJson() {
+    if (!search) return;
+    const url = URL.createObjectURL(
+      new Blob([JSON.stringify(search, null, 2)], { type: "application/json" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "search-results.json";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  const results = search?.results ?? [];
 
   return (
     <main className="intel" id="main">
       <div className="intel-intro intel-hero">
-        <h2>Ask across all six sources</h2>
+        <h2>Search the web for startup news</h2>
         <p>
-          Each question searches Indian Startup News, Entrackr, Inc42, YourStory,
-          Sujata Chronicle and VCCircle as it is asked. Answers use only what they
-          published, and every claim is numbered back to its story.
+          Results come back as a list. Nothing is read until you choose a page,
+          then that page is scraped and summarised for you.
         </p>
       </div>
 
-      <label className="field-label" htmlFor="intel-question">Your question</label>
-      <form
-        className="intel-form"
-        onSubmit={(e) => { e.preventDefault(); void ask(question); }}
-      >
+      <label className="field-label" htmlFor="intel-question">What are you looking for?</label>
+      <form className="intel-form" onSubmit={(e) => { e.preventDefault(); void run(query); }}>
         <input
           id="intel-question"
           type="search"
-          value={question}
-          placeholder="What is happening with Zepto's IPO?"
+          value={query}
+          placeholder="Recently funded fintech startups"
           disabled={busy}
-          onChange={(e) => setQuestion(e.target.value)}
+          onChange={(e) => setQuery(e.target.value)}
         />
-        <button type="submit" disabled={busy || !question.trim()}>
-          {busy ? "Searching" : "Ask"}
+        <button type="submit" disabled={busy || !query.trim()}>
+          {busy ? "Searching" : "Search"}
         </button>
       </form>
 
@@ -247,43 +210,81 @@ export default function Intelligence() {
               key={example}
               className="chip"
               disabled={busy}
-              onClick={() => { setQuestion(example); void ask(example); }}
+              onClick={() => { setQuery(example); void run(example); }}
             >
               {example}
             </button>
           ))}
         </div>
-        <label className="side-toggle">
-          <input type="checkbox" checked={live} onChange={(e) => setLive(e.target.checked)} />
-          Search the sites live (free, adds a few seconds)
-        </label>
-        <label className="side-toggle">
-          <input
-            type="checkbox"
-            checked={premium}
-            onChange={(e) => setPremium(e.target.checked)}
-          />
-          Better answers with Sonnet 4.6 (about 20x the cost)
-        </label>
       </div>
 
       {busy && (
         <div className="intel-pending" aria-live="polite">
           <span className="pulse" />
-          {live ? "Searching six sites live, then reading what they found" : "Reading the feed"}
+          Searching the web
         </div>
       )}
 
-      {log.map((entry) => <Answer key={entry.key} entry={entry} />)}
+      {search && !busy && (
+        <section className="fc-panel" aria-label="Search results">
+          <header className="fc-head">
+            <div>
+              <h2>
+                Results <span className="fc-count">({results.length})</span>
+              </h2>
+              <p>
+                {search.searched && search.searched !== search.query
+                  ? `Searched for “${search.searched}”. `
+                  : ""}
+                Choose Scrape page to read and summarise a result.
+              </p>
+            </div>
+            <div className="fc-tools">
+              <div className="fc-toggle" role="tablist" aria-label="View">
+                <button role="tab" aria-selected={view === "results"} onClick={() => setView("results")}>
+                  Results
+                </button>
+                <button role="tab" aria-selected={view === "json"} onClick={() => setView("json")}>
+                  JSON
+                </button>
+              </div>
+              <button className="fc-download" onClick={downloadJson} disabled={!results.length}>
+                <Icon d={DOWNLOAD} />
+                JSON
+              </button>
+            </div>
+          </header>
 
-      {log.length === 0 && !busy && (
-        <p className="side-note">
-          Answers use only stories from these six sources. Anything a live search
-          finds is added to the feed as well.
-        </p>
+          {search.error && <p className="answer-error fc-error">{search.error}</p>}
+
+          {!search.error && results.length === 0 && (
+            <p className="side-note fc-error">No results for that search. Try other words.</p>
+          )}
+
+          {view === "json" ? (
+            <pre className="x-json fc-json">{JSON.stringify(search, null, 2)}</pre>
+          ) : (
+            <ol className="fc-results">
+              {results.map((result) => (
+                <ResultRow
+                  key={result.url}
+                  result={result}
+                  scrape={scrapes[result.url]}
+                  onScrape={() => void scrapeOne(result)}
+                />
+              ))}
+            </ol>
+          )}
+
+          {!search.error && (
+            <p className="fc-foot">
+              {search.cached
+                ? "Reused search, no credits spent"
+                : `${search.credits_used} Firecrawl credit${search.credits_used === 1 ? "" : "s"} used`}
+            </p>
+          )}
+        </section>
       )}
-
-      {spent > 0 && <p className="side-spent">This session: ${spent.toFixed(6)}</p>}
     </main>
   );
 }

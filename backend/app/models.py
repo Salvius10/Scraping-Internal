@@ -197,20 +197,6 @@ class IngestRun(Base):
         return self.items_seen > 0 and self.items_new == self.items_seen
 
 
-class QuestionCache(Base):
-    """Intelligence question -> compiled search plan (site query + FTS terms).
-
-    Like FilterCache: a question asked twice is only ever paid for once.
-    """
-
-    __tablename__ = "question_cache"
-
-    question_hash: Mapped[str] = mapped_column(String(40), primary_key=True)
-    question: Mapped[str] = mapped_column(Text)
-    plan_json: Mapped[str] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
-
-
 class FilterCache(Base):
     """Natural-language filter phrase -> compiled JSON filter.
 

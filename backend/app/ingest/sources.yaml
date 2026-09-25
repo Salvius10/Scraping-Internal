@@ -5,7 +5,9 @@
 #   rss    -> free. feedparser reads feed_url on the 12h schedule.
 #   scrape -> costs ~$0.0024/run. ScrapeGraphAI extracts the listing page.
 #
-# live_search: how the Intelligence section reaches this source in real time.
+# live_search: NOT USED since Intelligence moved to Firecrawl web search
+# (see app/search/firecrawl.py). Kept as a verified record of each site's own
+# search entry point, should per-site search ever come back.
 # All three kinds are free -- no model call. Placeholders: {q} is the
 # URL-encoded query, {slug} the query as a hyphenated tag slug.
 #   search_feed -> targeted RSS of search results. Best case.

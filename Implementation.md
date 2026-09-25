@@ -75,9 +75,9 @@ explicit, user-facing opt-in and nothing else.
 │ (free)     │              │  (gpt-oss)    │            │ (gpt-oss│Sonnet) │
 └─────┬──────┘              └───────┬───────┘            └────────┬────────┘
       │               ┌─────────────▼──────────────┐              │
-      │               │  /api/intelligence         │              │
-      │               │  plan → live search (free) │              │
-      │               │  → FTS5 → cited answer     │              │
+      │               │  /api/intelligence/*       │              │
+      │               │  Firecrawl web search      │              │
+      │               │  → scrape one → summary    │              │
       │               └─────────────┬──────────────┘              │
       │                             │                             │
       └─────────────────────────────┼─────────────────────────────┘
@@ -263,14 +263,13 @@ backend/app/
 │   ├── enrich.py     223 lines   batched classification
 │   └── pipeline.py   225 lines   orchestration + CLI
 ├── search/
-│   ├── corpus.py                 FTS5 retrieval → citable evidence (free)
-│   └── live.py                   parallel live search of the six sites (free)
+│   └── firecrawl.py              hosted Firecrawl: web search + one-page scrape
 └── api/
     ├── feed.py       167 lines   /articles /facets /activity
     ├── status.py      75 lines   /status
     ├── filter.py     212 lines   /filter  (NL → SQL)
     ├── chat.py       149 lines   /chat    (explain · summarise · ask)
-    └── intelligence.py           /intelligence (cited Q&A, real-time)
+    └── intelligence.py           /intelligence/search, /intelligence/scrape
 ```
 
 ### 4.1 `config.py`
@@ -669,31 +668,39 @@ the filter back in plain language so the reader can see what was understood.
 Results are cached by `sha1(phrase.lower().strip())` in `FilterCache`, so the
 same phrase is **never recompiled**.
 
-#### `api/intelligence.py`
+#### `api/intelligence.py` + `search/firecrawl.py`
 
-`POST /api/intelligence {"question", "premium", "live"}`. It is real-time and never
-waits for the scheduler:
+Intelligence is a web search for startup news, followed by a scrape of the
+one result the reader chooses. It uses the hosted Firecrawl API
+(`FIRECRAWL_API_KEY` in `.env`). `FIRECRAWL_API_URL` can point at a
+self-hosted Firecrawl later, which needs no key.
 
 ```
-1. plan      gpt-oss → {search, terms, since_days}; cached per question
-             (QuestionCache); free keyword fallback when capped
-2. live      search/live.py: all six sites in parallel, 8s each, cached 10 min
-               search_html   Indian Startup News, Entrackr  /search?title={q}
-                             VCCircle                       /tag/{slug}
-               feed_refetch  Inc42, YourStory, Sujata Chronicle
-             results must name the searched entity; a slow site → "timeout"
-3. write     new finds get og:description (free) and go through store_item():
-             deduped, chunked and ready for the feed and later enrichment
-4. retrieve  search/corpus.py: FTS5 bm25 (headline 3, company 4), entity-first
-             tiers, 4 slots reserved for live finds, newest first
-5. answer    numbered passages → gpt-oss (Sonnet opt-in) → [n] citations
+POST /api/intelligence/search {"query"}
+  steer()     adds "startup news" unless the query already names startups,
+              funding, IPOs, founders, VCs or deals
+  Firecrawl   /v2/search, web source, 10 results, NO scrapeOptions:
+              pages are not fetched. 2 credits measured for 10 results
+              (documented as 1). Cached 15 min.
+  → numbered results: title, url, description, domain
+
+POST /api/intelligence/scrape {"url", "query"}
+  Firecrawl   /v2/scrape, main content as markdown. 1 credit. Cached 1 h.
+  gpt-oss     summary for the reader's query, first 20 K characters of the
+              page (~$0.001), 3-6 bullets. Cached 1 h per page + query.
+  → summary + page content (first 30 K characters)
 ```
 
-Each citation carries an `article_id` and a `chunk_id`, so every claim
-resolves to stored text. When the budget is exhausted the response still
-returns the matching stories and an `error`; only the prose is withheld.
-Measured on the first live run: **$0.000467** uncached, **$0.000325** with
-the plan cached, and about 7s with all six sites answering.
+Nothing is read until the reader picks a result. A search makes no model call.
+Firecrawl credits are billed by Firecrawl, not by `llm/budget.py`. When the LLM
+budget is spent, a scrape still returns the page content; only the summary is
+withheld. First live run: search 3.6 s, 2 credits; scrape + summary 12.9 s,
+1 credit and $0.000998. Firecrawl errors are reported plainly: a bad key (401), used-up
+credits (402), rate limits (429) and timeouts.
+
+**Replaced:** the six-site live search (`search/live.py`), FTS5 corpus
+retrieval (`search/corpus.py`) and the cited-answer flow. The verified per-site
+search URLs are kept in `sources.yaml` for reference.
 
 #### `api/extract.py` + `extract.py` — extract from any URL
 
@@ -971,8 +978,8 @@ chat_ask          1 call    $0.000187
                             $0.017285     of $7.00  (0.2%)
 ```
 
-VCCircle scraping is now recorded under `scrape`. Intelligence spend is recorded
-under `intelligence_plan` and `intelligence`.
+VCCircle scraping is now recorded under `scrape`. Intelligence page summaries
+are recorded under `intelligence_summary`; Firecrawl credits are billed by Firecrawl.
 
 ### Unit economics
 
@@ -1011,7 +1018,7 @@ under `intelligence_plan` and `intelligence`.
 
 ## 8. Testing
 
-**202 tests, all offline — no test spends money.**
+**198 tests, all offline — no test spends money.**
 
 | File | Tests | Covers |
 |---|---|---|
@@ -1020,7 +1027,7 @@ under `intelligence_plan` and `intelligence`.
 | `test_enrich.py` | 37 | Closed taxonomy, company cleaning, meta extraction, fixture validity |
 | `test_filter.py` | 22 | Untrusted model output, cache keys, plain-language echo |
 | `test_scraper.py` | 17 | Every ScrapeGraphAI response shape observed live; scrape calls cap-checked and ledgered |
-| `test_intelligence.py` | 30 | Untrusted plans, FTS5 injection, entity-first ranking, live-result parsing and relevance, one slow site never stalls, write-through, citation parsing incl. gpt-oss `【n】`, budget degradation |
+| `test_firecrawl.py` | 26 | Search never scrapes or calls the model, query steering, cached search and scrape (no double credits), readable 401/402/429/timeout errors, missing key, self-hosted without key, summary per query, spent budget still returns page content |
 | `test_scheduler.py` | 10 | Restart does not re-run a fresh feed, runs never overlap, a failing run is survived |
 | `test_extract.py` | 32 | URL guard (private IPs, metadata endpoint, schemes, ports, redirect-to-localhost), size/type limits, HTML cleaning, result shapes, budget checked before any call, cache, one run at a time |
 | `test_storage.py` | 6 | Timestamps come back aware, API emits an offset, activity uses the reader's day, chunk sync |
@@ -1093,7 +1100,7 @@ Edit `backend/app/ingest/sources.yaml` — nothing else. Run
 | Gap | Impact | Notes |
 |---|---|---|
 | **Valuation vs round size** | "Brahma AI at $2 bn valuation" and "raises $150M" read as conflicting figures and stay unmerged | Errs toward showing a duplicate rather than hiding a story — the right direction |
-| **No open-web search** | Intelligence searches only the six sources | Deliberate. It avoids a search API and a credit card |
+| **Firecrawl credits are not in the $7 ledger** | `python -m app.llm` shows LLM spend only | Credits are billed and shown by Firecrawl; the page shows credits used per search and scrape |
 | **VCCircle live search is tag-based** | Finds a company only if VCCircle has a tag page for it | Its `/search` page is rendered client-side, so there is nothing to parse without a headless browser |
 | **URL extraction cannot read JavaScript-only pages** | Single-page apps return an empty shell over plain HTTP | Refused for free with a clear message; a headless browser would lift it at the cost of a much larger attack surface |
 | **Live finds lack company/category until the next refresh** | Newly written-through stories show no company and "Other" in the feed for up to 12h | The next scheduled `enrich_pending()` classifies them |

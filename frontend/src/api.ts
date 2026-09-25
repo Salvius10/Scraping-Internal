@@ -81,51 +81,36 @@ export interface ChatRequest {
   premium?: boolean;
 }
 
-export interface Citation {
+export interface WebResult {
   n: number;
-  article_id: number;
-  chunk_id: number | null;
-  headline: string;
   url: string;
-  source: string;
-  published_at: string | null;
-  company: string | null;
-  category: Category | null;
-  snippet: string;
-  cited: boolean;
-  discovered: boolean;
+  title: string;
+  description: string;
+  domain: string;
 }
 
-export interface SourceStatus {
-  name: string;
-  label: string;
-  kind: string;
-  status: "ok" | "empty" | "timeout" | "error" | "skipped";
-  found: number;
-  new: number;
+export interface WebSearchResponse {
+  query: string;
+  searched: string | null;
+  results: WebResult[];
+  credits_used: number;
   cached: boolean;
   error: string | null;
 }
 
-export interface IntelligenceResponse {
-  question: string;
-  answer: string | null;
+export interface ScrapeResponse {
+  url: string;
+  title: string | null;
+  description: string | null;
+  summary: string | null;
+  content: string | null;
+  content_truncated: boolean;
   model: string | null;
-  search: string | null;
-  terms: string[];
-  since_days: number | null;
-  citations: Citation[];
-  sources: SourceStatus[];
   cost_usd: number;
-  plan_cached: boolean;
+  credits_used: number;
+  cached: boolean;
   error: string | null;
   budget_remaining: number;
-}
-
-export interface IntelligenceRequest {
-  question: string;
-  premium?: boolean;
-  live?: boolean;
 }
 
 export interface ExtractResponse {
@@ -192,8 +177,10 @@ export const api = {
   status: () => get<Status>("/status"),
   filter: (phrase: string) => post<FilterResponse>("/filter", { phrase }),
   chat: (request: ChatRequest) => post<ChatResponse>("/chat", request),
-  intelligence: (request: IntelligenceRequest) =>
-    post<IntelligenceResponse>("/intelligence", request),
+  webSearch: (query: string) =>
+    post<WebSearchResponse>("/intelligence/search", { query }),
+  scrapePage: (url: string, query: string) =>
+    post<ScrapeResponse>("/intelligence/scrape", { url, query }),
   extract: (url: string, prompt: string) =>
     post<ExtractResponse>("/extract", { url, prompt }),
 };
