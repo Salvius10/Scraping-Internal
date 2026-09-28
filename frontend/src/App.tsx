@@ -3,6 +3,7 @@ import CopyLink from "./CopyLink";
 import ExtractPanel from "./ExtractPanel";
 import Insights from "./Insights";
 import Intelligence from "./Intelligence";
+import RefreshButton from "./RefreshButton";
 import Sidebar from "./Sidebar";
 import {
   api, categoryColor, categoryTextColor, parseTime, sourceLabel,
@@ -64,7 +65,7 @@ function viewFromHash(): View {
 /* ── Masthead ──────────────────────────────────────────────────────────── */
 
 function Masthead({
-  status, activity, activeDay, onPickDay, view, onView,
+  status, activity, activeDay, onPickDay, view, onView, onRefreshed, onRefreshMessage,
 }: {
   status: Status | null;
   activity: ActivityDay[];
@@ -72,6 +73,8 @@ function Masthead({
   onPickDay: (date: string | null) => void;
   view: View;
   onView: (view: View) => void;
+  onRefreshed: () => void;
+  onRefreshMessage: (text: string) => void;
 }) {
   const peak = Math.max(1, ...activity.map((d) => d.count));
   const stale =
@@ -132,11 +135,18 @@ function Masthead({
         </div>
       )}
 
-      <div className="freshness" data-stale={stale} title={next}>
-        <span className="pulse" />
-        {status
-          ? `${describeAge(status.hours_since_refresh, status.refresh_interval_hours)} · ${status.article_count} stories`
-          : "Loading"}
+      <div className="masthead-right">
+        <div className="freshness" data-stale={stale} title={next}>
+          <span className="pulse" />
+          {status
+            ? `${describeAge(status.hours_since_refresh, status.refresh_interval_hours)} · ${status.article_count} stories`
+            : "Loading"}
+        </div>
+        {view === "feed" && (
+          <RefreshButton
+            scope="feed" tone="dark" onDone={onRefreshed} onMessage={onRefreshMessage}
+          />
+        )}
       </div>
     </header>
   );
@@ -433,6 +443,13 @@ export default function App() {
     void load(false);
   }, [load]);
 
+  /** After a manual "Refresh now": everything the refresh can change. */
+  const reloadAll = useCallback(() => {
+    loadMeta();
+    offsetRef.current = 0;
+    void load(false);
+  }, [loadMeta, load]);
+
   /* Stay in step with the 12-hour scheduler: when new stories land, reload
      the buckets, counts and the current page of stories. */
   useRefreshSync((next, prev) => {
@@ -536,6 +553,8 @@ export default function App() {
           onPickDay={setActiveDay}
           view={view}
           onView={showView}
+          onRefreshed={reloadAll}
+          onRefreshMessage={setUpdateNote}
         />
         <Insights />
       </div>
@@ -553,6 +572,8 @@ export default function App() {
           onPickDay={setActiveDay}
           view={view}
           onView={showView}
+          onRefreshed={reloadAll}
+          onRefreshMessage={setUpdateNote}
         />
         <Intelligence />
       </div>
@@ -569,6 +590,8 @@ export default function App() {
         onPickDay={setActiveDay}
         view={view}
         onView={showView}
+        onRefreshed={reloadAll}
+        onRefreshMessage={setUpdateNote}
       />
 
       <Rail

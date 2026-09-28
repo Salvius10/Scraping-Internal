@@ -29,6 +29,11 @@ class Settings(BaseSettings):
     # by `python -m app.scheduler` or by hand, so two processes do not race.
     scheduler_enabled: bool = True
 
+    # "Refresh now" buttons: a scope refreshed less than this long ago (by hand
+    # or by the scheduler) is not refreshed again, so repeated clicks cannot
+    # keep paying for enrichment and scraping.
+    manual_refresh_cooldown_minutes: int = 10
+
     # --- Intelligence: web search + on-demand scrape via hosted Firecrawl ---
     # Firecrawl bills in its own credits, separate from the $7 LLM cap: a
     # search of 10 results measured 2 credits, a scrape 1 per page. Set the
@@ -38,6 +43,14 @@ class Settings(BaseSettings):
     firecrawl_api_url: str = "https://api.firecrawl.dev"
     firecrawl_timeout: float = 45.0
     firecrawl_search_limit: int = 10
+
+    # --- Insights: VC firms (ingest/vc_firms.py) ---
+    vc_firms_file: Path = BACKEND_DIR / "app" / "ingest" / "vc_firms.yaml"
+    # Free reads (feeds, plain HTML) run on every refresh. Firecrawl reads cost
+    # credits -- 10 scrapes and 3 maps at 1, 23 searches at ~2: about 59 a round --
+    # so they run at most this often.
+    vc_firecrawl_hours: int = 24
+    vc_items_per_firm: int = 30       # newest posts taken from each read
 
     # --- HTTP ---
     user_agent: str = (

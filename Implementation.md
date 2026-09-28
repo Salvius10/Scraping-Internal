@@ -715,6 +715,48 @@ real Excel date), Source, Headline, Link (clickable), with a frozen, filterable
 header. The page follows the scheduler through the same shared hook as the
 feed (`useRefreshSync`), and reloads when new stories land.
 
+#### `api/vcs.py` + `ingest/vc_firms.py` — Insights: VC firms
+
+Who each of 50 Indian VC firms and angel networks funded or helped, read from
+**each firm's own website news** first. The registry is
+`ingest/vc_firms.yaml`, the only file to edit to add a firm. Each firm has a
+`site` read, cheapest way first, as probed on 2026-09-28 (plain HTTP, then a
+one-off Firecrawl map for sites that block it):
+
+| site via | firms | cost |
+|---|---|---|
+| `rss` — the firm's own feed | 7 (Nexus, Chiratae, Orios, Alteria, IAN, Speciale, Fireside) | free |
+| `html` — news page over plain HTTP, post links picked by `link_pattern` | 15 (Accel, Z47, Titan, Peak XV, Blume, Kalaari, 3one4, Yali, Kae, Exfinity, BVP, Axilor, Ventureast, Elevation, SoftBank) | free |
+| `sitemap` — sitemap filtered to posts, newest `lastmod` first | 3 (Antler, Ankur, General Catalyst) | free |
+| `scrape` — Firecrawl scrape of a 403 / JavaScript-only news page | 10 | 1 credit |
+| `map` — Firecrawl list of the site's pages, for posts with no listing page | 3 (India Quotient, Prime VP, 100X.VC) | 1 credit |
+
+12 firms have no readable news on their own site, each with the reason
+recorded as `no_site` (parked domains, sites with no news pages, sites that do
+not answer). 23 firms also have a `search` read: a Firecrawl news search
+(~2 credits) for their deals as other outlets report them.
+
+```
+refresh() -> refresh_firms()   after rounds, on every 12h refresh
+  one job per read (site, search); free reads every time; Firecrawl reads at
+  most every vc_firecrawl_hours (24); a failed read is retried next refresh
+  new posts on html / sitemap / map sites -> the post's own page for its
+  title and article:published_time (free, 12 per read)
+  new posts only -> gpt-oss, 25 per call (~$0.00005 each):
+     Investment · Portfolio news · Fund news · Other  + company, round, amount
+GET /api/insights/vcs?firm=&start=&end=&all=   posts newest first + every firm
+GET /api/insights/vcs.xlsx                     same rows as Excel
+python -m app.ingest.vc_firms --once [--firm k] [--free-only] [--force] [--no-classify]
+```
+
+The page also shows funding rounds from the feed and "Search web" whose
+investors name the firm (regex `aliases`, free). One deal shows once: for the
+same firm and company within 14 days the firm's own post wins, then the
+search result, then the news round. "Found via" filters to Firm website, News
+search or News feed. Only `Other` (essays, podcasts, events) is hidden by
+default. Firecrawl costs about 59 credits per round of reads (10 scrapes, 3
+maps, 23 searches at ~2), so about 1,800 a month at the 24-hour default.
+
 #### `api/buckets.py` — buckets, kept in step with the scheduler
 
 `GET /api/buckets` returns fixed views of the recent feed, shown as a bar
@@ -1021,6 +1063,28 @@ every 12h → refresh_job():
     refreshed < 12h ago elsewhere?  → skip (never pay twice)
     pipeline.refresh(): ingest → describe → enrich → dedupe → sync chunks
 ```
+
+### 6.4a Manual refresh ("Refresh now")
+
+A button on the News feed masthead, Insights > Startup firms and Insights >
+VC firms, for when the reader does not want to wait for the scheduler.
+
+```
+POST /api/refresh {"scope": "feed" | "vcs"}     scheduler.start_manual()
+  feed   the full refresh (ingest -> ... -> rounds -> VC firms): News feed,
+         Startup firms
+  vcs    VC firms only: free reads, plus Firecrawl reads that are due
+  refused (started: false + reason) when a refresh is already running, or the
+  scope was refreshed within manual_refresh_cooldown_minutes (10)
+  runs in a background thread holding the scheduler's own lock
+GET  /api/refresh      running? summary or error of the last manual run
+```
+
+The button polls every 3 s while a run is going, then reloads the page and
+shows the summary ("Refreshed: 12 new stories, 3 funding rounds read, 5 new
+VC firm posts."). One refresh runs at a time across every page and tab; a page
+opened mid-run shows it running and follows it. The next scheduled run then
+skips itself, as the feed is fresh.
 
 ### 6.5 Sidebar answer
 

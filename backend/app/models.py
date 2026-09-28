@@ -12,7 +12,7 @@ import enum
 from datetime import datetime, timezone
 
 from sqlalchemy import (
-    DateTime, Enum, Float, ForeignKey, Index, Integer, String, Text,
+    DateTime, Enum, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.types import TypeDecorator
@@ -263,6 +263,63 @@ class WebRound(Base):
     investors: Mapped[str | None] = mapped_column(Text, default=None)
     kept: Mapped[bool] = mapped_column(default=True, index=True)
     found_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
+
+
+class VcKind(str, enum.Enum):
+    """What a VC firm's post is about. Only OTHER is hidden by default."""
+
+    INVESTMENT = "Investment"      # the firm invested in, led or joined a round
+    PORTFOLIO = "Portfolio news"   # a backed company's IPO, exit, milestone
+    FUND = "Fund news"             # the firm raised or launched a fund/programme
+    OTHER = "Other"                # essays, podcasts, events, hiring, unrelated
+
+
+class VcPost(Base):
+    """One post read for a VC firm: from its own site, or a news search.
+
+    Written when first seen; `classified_at` is set once gpt-oss has read the
+    title, so no post is paid for twice. The same link can belong to two
+    firms (a co-led round), hence uniqueness on (firm, url).
+    """
+
+    __tablename__ = "vc_posts"
+    __table_args__ = (UniqueConstraint("firm", "url", name="uq_vc_posts_firm_url"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    firm: Mapped[str] = mapped_column(String(60), index=True)
+    url: Mapped[str] = mapped_column(String(1000))
+    title: Mapped[str] = mapped_column(Text)
+    snippet: Mapped[str | None] = mapped_column(Text, default=None)
+    published_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), index=True,
+                                                          default=None)
+    date_approx: Mapped[bool] = mapped_column(default=False)
+    via: Mapped[str] = mapped_column(String(20))       # rss | html | scrape | search
+    found_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
+
+    # Filled by the batched gpt-oss pass.
+    classified_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), default=None)
+    kind: Mapped[VcKind | None] = mapped_column(Enum(VcKind), index=True, default=None)
+    headline: Mapped[str | None] = mapped_column(Text, default=None)
+    company: Mapped[str | None] = mapped_column(String(200), default=None)
+    round_label: Mapped[str | None] = mapped_column(String(80), default=None)
+    amount: Mapped[str | None] = mapped_column(String(120), default=None)
+
+
+class VcRead(Base):
+    """One read of one firm. Shows health on the page, and spaces out the
+    Firecrawl reads, which cost credits."""
+
+    __tablename__ = "vc_reads"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    firm: Mapped[str] = mapped_column(String(60), index=True)
+    via: Mapped[str] = mapped_column(String(20))
+    started_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow,
+                                                 index=True)
+    items_seen: Mapped[int] = mapped_column(Integer, default=0)
+    items_new: Mapped[int] = mapped_column(Integer, default=0)
+    credits_used: Mapped[int] = mapped_column(Integer, default=0)
+    error: Mapped[str | None] = mapped_column(Text, default=None)
 
 
 class FilterCache(Base):

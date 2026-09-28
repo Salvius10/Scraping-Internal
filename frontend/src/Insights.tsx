@@ -3,33 +3,11 @@ import CopyLink from "./CopyLink";
 import {
   api, parseTime, type DateRange, type RoundsResponse, type SearchWebResponse, type StageKey,
 } from "./api";
+import { approxFmt, istDay, PRESETS, publishedFmt, showDay } from "./dates";
 import { useRefreshSync } from "./useRefreshSync";
-
-const publishedFmt = new Intl.DateTimeFormat("en-IN", {
-  day: "numeric", month: "short", year: "numeric",
-  hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata",
-});
-
-// Phosphor Icons (MIT), regular weight: "download-simple".
-const DOWNLOAD =
-  "M224,144v64a8,8,0,0,1-8,8H40a8,8,0,0,1-8-8V144a8,8,0,0,1,16,0v56H208V144a8,8,0,0,1,16,0Zm-101.66,5.66a8,8,0,0,0,11.32,0l40-40a8,8,0,0,0-11.32-11.32L136,124.69V32a8,8,0,0,0-16,0v92.69L93.66,98.34a8,8,0,0,0-11.32,11.32Z";
-
-/** Today in India as YYYY-MM-DD, optionally some days back. */
-function istDay(daysAgo = 0): string {
-  const at = new Date(Date.now() - daysAgo * 86_400_000);
-  return at.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
-}
-
-const PRESETS: { label: string; days: number | null }[] = [
-  { label: "Last 7 days", days: 7 },
-  { label: "Last 30 days", days: 30 },
-  { label: "Last 90 days", days: 90 },
-  { label: "All time", days: null },
-];
-
-const approxFmt = new Intl.DateTimeFormat("en-IN", {
-  day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata",
-});
+import VcFirms from "./VcFirms";
+import DownloadIcon from "./DownloadIcon";
+import RefreshButton from "./RefreshButton";
 
 // Phosphor Icons (MIT), regular weight: "globe".
 const GLOBE =
@@ -47,26 +25,13 @@ function summarise(r: SearchWebResponse): string {
   return added + skipped + cost + failed;
 }
 
-const dayFmt = new Intl.DateTimeFormat("en-IN", {
-  day: "numeric", month: "short", year: "numeric", timeZone: "UTC",
-});
-const showDay = (ymd: string) => dayFmt.format(new Date(`${ymd}T00:00:00Z`));
-
 type Section = "startups" | "vcs" | "events";
 
 const SECTIONS: { key: Section; label: string; ready: boolean }[] = [
   { key: "startups", label: "Startup firms", ready: true },
-  { key: "vcs", label: "VC firms", ready: false },
+  { key: "vcs", label: "VC firms", ready: true },
   { key: "events", label: "Events organised", ready: false },
 ];
-
-function DownloadIcon() {
-  return (
-    <svg viewBox="0 0 256 256" width="15" height="15" fill="currentColor" aria-hidden="true">
-      <path d={DOWNLOAD} />
-    </svg>
-  );
-}
 
 function StartupFirms() {
   const [stage, setStage] = useState<StageKey>("pre-seed");
@@ -144,6 +109,11 @@ function StartupFirms() {
           <p>Companies that raised money, newest first, from the funding news in the feed.</p>
         </div>
         <div className="ins-actions">
+          <RefreshButton
+            scope="feed"
+            onDone={() => { if (!badRange) void load(stage, range); }}
+            onMessage={setNote}
+          />
           <a className="ins-download" href={api.roundsExcelUrl(stage, range)} download>
             <DownloadIcon />
             Excel: {current?.label ?? "this stage"}
@@ -319,7 +289,7 @@ function ComingSoon({ label }: { label: string }) {
     <section className="ins-main" aria-label={label}>
       <div className="ins-soon">
         <h2>{label}</h2>
-        <p>This section is planned. Startup firms is ready to use now.</p>
+        <p>This section is planned. Startup firms and VC firms are ready to use now.</p>
       </div>
     </section>
   );
@@ -345,7 +315,9 @@ export default function Insights() {
           </button>
         ))}
       </nav>
-      {active.ready ? <StartupFirms /> : <ComingSoon label={active.label} />}
+      {section === "startups" && <StartupFirms />}
+      {section === "vcs" && <VcFirms />}
+      {!active.ready && <ComingSoon label={active.label} />}
     </div>
   );
 }

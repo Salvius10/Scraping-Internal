@@ -23,6 +23,7 @@ import argparse
 import logging
 import sys
 import threading
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func, select
@@ -83,16 +84,132 @@ def refresh_job() -> None:
         e = result.enrich
         log.info(
             "scheduler: refresh done -- %d sources (%d failed), %d new, "
-            "%s described, %s enriched ($%.6f), %s merged, %s rounds read",
+            "%s described, %s enriched ($%.6f), %s merged, %s rounds read, "
+            "%s VC posts new",
             len(result.runs), sum(1 for r in result.runs if r.error),
             sum(r.items_new for r in result.runs), result.described,
             getattr(e, "updated", 0), getattr(e, "cost_usd", 0.0), result.merged,
-            getattr(result.rounds, "extracted", 0),
+            getattr(result.rounds, "extracted", 0), getattr(result.vcs, "new", 0),
         )
     except Exception:  # noqa: BLE001 - log and wait for the next interval
         log.exception("scheduler: refresh failed")
     finally:
         _run_lock.release()
+
+
+# --- Manual refresh ------------------------------------------------------------------
+#
+# The "Refresh now" buttons. Same lock as the scheduled job, so a manual run and
+# a scheduled one never overlap (and never pay for enrichment twice). Runs in a
+# background thread; the page polls `manual_status()`.
+#
+#   feed  the full refresh: news, funding rounds for Insights, VC firms
+#   vcs   VC firms only: free reads, plus Firecrawl reads that are due
+
+MANUAL_SCOPES = ("feed", "vcs")
+
+
+@dataclass
+class ManualRun:
+    scope: str | None = None
+    running: bool = False
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    summary: str | None = None
+    error: str | None = None
+
+
+_manual = ManualRun()
+_manual_guard = threading.Lock()
+
+
+def manual_status() -> ManualRun:
+    with _manual_guard:
+        return ManualRun(**_manual.__dict__)
+
+
+def _last_vc_read() -> datetime | None:
+    from .models import VcRead
+    with session_scope() as s:
+        return s.scalar(select(func.max(VcRead.started_at)))
+
+
+def _cooldown_left(scope: str, now: datetime) -> timedelta | None:
+    """Time left before this scope may be refreshed by hand again, if any."""
+    last = last_refresh() if scope == "feed" else _last_vc_read()
+    wait = timedelta(minutes=settings.manual_refresh_cooldown_minutes)
+    if last is not None and now - last < wait:
+        return wait - (now - last)
+    return None
+
+
+def _describe_feed(result) -> str:
+    new = sum(r.items_new for r in result.runs)
+    failed = [r.source for r in result.runs if r.error]
+    parts = [f"{new} new {'story' if new == 1 else 'stories'}"]
+    rounds = getattr(result.rounds, "extracted", None)
+    if rounds is not None:
+        parts.append(f"{rounds} funding {'round' if rounds == 1 else 'rounds'} read")
+    if result.vcs is not None:
+        parts.append(f"{result.vcs.new} new VC firm posts")
+    text = "Refreshed: " + ", ".join(parts)
+    if failed:
+        text += f". Could not read {', '.join(failed)}"
+    return text + "."
+
+
+def _describe_vcs(result) -> str:
+    text = (f"Refreshed VC firms: {result.new} new "
+            f"{'post' if result.new == 1 else 'posts'} from {len(result.reads)} reads")
+    if result.skipped:
+        text += (f"; {result.skipped} Firecrawl reads skipped, as they ran in the "
+                 f"last {settings.vc_firecrawl_hours}h")
+    if result.failed:
+        text += f"; {result.failed} failed"
+    return text + "."
+
+
+def _run_manual(scope: str) -> None:
+    summary = error = None
+    try:
+        if scope == "feed":
+            from .ingest.pipeline import refresh
+            summary = _describe_feed(refresh())
+        else:
+            from .ingest.vc_firms import refresh_firms
+            summary = _describe_vcs(refresh_firms())
+    except Exception as exc:  # noqa: BLE001 - reported on the page, not raised
+        log.exception("manual %s refresh failed", scope)
+        error = f"The refresh failed: {type(exc).__name__}: {exc}"[:300]
+    finally:
+        _run_lock.release()
+        with _manual_guard:
+            _manual.running = False
+            _manual.finished_at = utcnow()
+            _manual.summary, _manual.error = summary, error
+        log.info("manual %s refresh done: %s", scope, error or summary)
+
+
+def start_manual(scope: str) -> str | None:
+    """Start a manual refresh in the background. Returns why not, or None."""
+    if scope not in MANUAL_SCOPES:
+        return f"Unknown refresh {scope!r}."
+    now = utcnow()
+    left = _cooldown_left(scope, now)
+    if left is not None:
+        minutes = max(1, round(left.total_seconds() / 60))
+        return (f"Refreshed moments ago. Try again in {minutes} "
+                f"{'minute' if minutes == 1 else 'minutes'}.")
+    if not _run_lock.acquire(blocking=False):
+        return "A refresh is already running. It will update this page when done."
+    with _manual_guard:
+        _manual.scope, _manual.running = scope, True
+        _manual.started_at, _manual.finished_at = now, None
+        _manual.summary = _manual.error = None
+    threading.Thread(target=_run_manual, args=(scope,), daemon=True,
+                     name=f"manual-{scope}-refresh").start()
+    log.info("manual %s refresh started", scope)
+    return None
 
 
 def _add_job(scheduler) -> None:

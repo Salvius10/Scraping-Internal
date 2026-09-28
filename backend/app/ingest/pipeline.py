@@ -150,6 +150,7 @@ class RefreshResult:
     enrich: object | None = None       # EnrichResult, or None when skipped
     merged: int | None = None
     rounds: object | None = None       # RoundsResult, or None when skipped
+    vcs: object | None = None          # VcResult, or None when it failed
     chunks_synced: int = 0
 
     @property
@@ -183,6 +184,15 @@ def refresh(
         # each story is read. Paid, batched, only new Funding stories.
         from .rounds import extract_pending
         result.rounds = extract_pending()
+
+    # Insights > VC firms: each firm's own news. Feeds and plain HTML are free
+    # every time; Firecrawl reads are spaced out; sorting new posts is paid.
+    # A failure here must never cost the feed its refresh.
+    from .vc_firms import refresh_firms
+    try:
+        result.vcs = refresh_firms(free_only=skip_paid, classify=enrich)
+    except Exception:  # noqa: BLE001
+        log.exception("vc firms: refresh failed")
 
     # Belt and braces: citations must quote what is stored. Free.
     from .chunks import sync_all_chunks
@@ -268,6 +278,13 @@ def main(argv: list[str] | None = None) -> int:
         r = result.rounds
         print("rounds:   %d/%d funding stories read for Insights, $%.6f"
               % (r.extracted, r.considered, r.cost_usd))
+
+    if result.vcs is not None:
+        v = result.vcs
+        print("vc firms: %d read (%d failed), %d new posts, %d Firecrawl credits"
+              % (len(v.reads), v.failed, v.new, v.credits))
+        if v.classify is not None:
+            print("          %d sorted, $%.6f" % (v.classify.classified, v.classify.cost_usd))
 
     if result.chunks_synced:
         print("chunks:   %d citation passages brought up to date (free)"

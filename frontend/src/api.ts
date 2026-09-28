@@ -192,6 +192,74 @@ export interface RoundsResponse {
   pending: number;
 }
 
+export type VcKind = "Investment" | "Portfolio news" | "Fund news" | "Other";
+
+export interface VcPost {
+  id: string;
+  firm: string;
+  firm_label: string;
+  kind: VcKind;
+  headline: string;
+  company: string | null;
+  round: string | null;
+  amount: string | null;
+  published_at: string | null;
+  date_approx: boolean;
+  url: string;
+  origin: VcOrigin;
+  source_label: string;
+}
+
+export type VcOrigin = "site" | "search" | "news";
+
+export interface VcRead {
+  via: "rss" | "html" | "sitemap" | "scrape" | "map" | "search";
+  label: string;
+  is_site: boolean;
+  last_read: string | null;
+  last_error: string | null;
+}
+
+export interface VcFirm {
+  key: string;
+  label: string;
+  home: string;
+  count: number;
+  reads: VcRead[];
+  no_site: string | null;
+}
+
+export interface VcsResponse {
+  firm: string | null;
+  firms: VcFirm[];
+  posts: VcPost[];
+  pending: number;
+  hidden_other: number;
+}
+
+export interface VcQuery extends DateRange {
+  firm?: string;
+  origin?: VcOrigin;
+  all?: boolean;
+}
+
+export type RefreshScope = "feed" | "vcs";
+
+export interface RefreshStatus {
+  scope: RefreshScope | null;
+  running: boolean;
+  started_at: string | null;
+  finished_at: string | null;
+  summary: string | null;
+  error: string | null;
+}
+
+export interface RefreshStart {
+  started: boolean;
+  reason: string | null;
+  status: RefreshStatus;
+}
+
 export interface FeedQuery {
   limit?: number;
   offset?: number;
@@ -256,6 +324,19 @@ export const api = {
     if (range.end) params.set("end", range.end);
     const query = params.toString();
     return `/api/insights/rounds.xlsx${query ? `?${query}` : ""}`;
+  },
+  refresh: (scope: RefreshScope) => post<RefreshStart>("/refresh", { scope }),
+  refreshStatus: () => get<RefreshStatus>("/refresh"),
+  vcs: (query: VcQuery) => get<VcsResponse>("/insights/vcs", { ...query, all: query.all || undefined }),
+  vcsExcelUrl: (query: VcQuery) => {
+    const params = new URLSearchParams();
+    if (query.firm) params.set("firm", query.firm);
+    if (query.start) params.set("start", query.start);
+    if (query.end) params.set("end", query.end);
+    if (query.origin) params.set("origin", query.origin);
+    if (query.all) params.set("all", "true");
+    const q = params.toString();
+    return `/api/insights/vcs.xlsx${q ? `?${q}` : ""}`;
   },
   webSearch: (query: string, kind: SearchKind) =>
     post<WebSearchResponse>("/intelligence/search", { query, kind }),

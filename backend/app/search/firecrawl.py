@@ -296,6 +296,40 @@ def scrape(url: str) -> tuple[Page, bool]:
     return page, False
 
 
+@dataclass
+class SiteLink:
+    url: str
+    title: str
+    description: str
+
+
+def map_site(url: str, limit: int = 500) -> tuple[list[SiteLink], int, bool]:
+    """List a site's pages with their titles; nothing is scraped. Returns
+    (links, credits, cached). For sites whose posts have no listing page."""
+    url = (url or "").strip()
+    if not url.startswith(("http://", "https://")):
+        raise FirecrawlError("Only http and https sites can be mapped.")
+
+    key = _key("map", url, str(limit))
+    hit = _cached(key)
+    if hit is not None:
+        return hit, 0, True
+
+    payload = _post("/v2/map", {"url": url, "limit": limit,
+                                "timeout": int(settings.firecrawl_timeout * 1000)})
+    links = []
+    for row in payload.get("links") or []:
+        if isinstance(row, str):
+            row = {"url": row}
+        link = (row or {}).get("url") or ""
+        if link.startswith(("http://", "https://")):
+            links.append(SiteLink(url=link, title=plain(row.get("title") or "", 300),
+                                  description=plain(row.get("description") or "")))
+    _store(key, links, SCRAPE_TTL)
+    # The map response carries no credit count; Firecrawl bills 1 per map.
+    return links, int(payload.get("creditsUsed") or 1), False
+
+
 def clear_cache() -> None:
     with _cache_lock:
         _cache.clear()

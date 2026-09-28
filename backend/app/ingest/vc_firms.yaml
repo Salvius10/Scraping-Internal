@@ -1,0 +1,534 @@
+# VC firm registry for Insights > VC firms -- the only file to edit to add or
+# remove a firm. Probed on 2026-09-28 (plain HTTP, and Firecrawl map for sites
+# that block it).
+#
+# site: the firm's OWN website news, read one way, cheapest first:
+#   rss      the firm's feed                                              free
+#   html     its news page over plain HTTP; post links picked by
+#            `link_pattern` (a regex on the URL) when given               free
+#   sitemap  its sitemap, filtered by `link_pattern`, newest first        free
+#   scrape   Firecrawl scrape of the news page (403 / JavaScript-only)    1 credit
+#   map      Firecrawl list of the site's pages, filtered by
+#            `link_pattern` -- for posts with no listing page            1 credit
+#   `note` records why a firm is read the way it is. `site: null` with
+#   `no_site` says why there is no site news to read.
+#
+# search: optional Firecrawl news search query (~2 credits) -- news ABOUT the
+#   firm's deals from other outlets, on top of its own site.
+#
+# Firecrawl reads run at most every `vc_firecrawl_hours` (config.py).
+#
+# aliases: regexes (case-insensitive) matched against the investors named in
+# funding rounds from the news feed, so deals reported by the press show under
+# the firm too. Free.
+
+firms:
+
+- key: antler-india
+  label: Antler India
+  home: https://www.antler.co/location/india
+  site:
+    via: sitemap
+    url: https://www.antler.co/sitemap.xml
+    link_pattern: /press-releases/.
+    note: newsroom is JavaScript-rendered; the sitemap lists every press release
+  search: '"Antler" India startup funding'
+  aliases:
+  - \bantler\b
+
+- key: titan-capital
+  label: Titan Capital
+  home: https://titancapital.vc/
+  site:
+    via: html
+    url: https://titancapital.vc/blogs
+    link_pattern: /blogs/
+  aliases:
+  - titan capital
+
+- key: peak-xv
+  label: Peak XV Partners
+  home: https://www.peakxv.com/
+  site:
+    via: html
+    url: https://www.peakxv.com/insights
+    link_pattern: /insight/
+  aliases:
+  - peak ?xv
+  - sequoia (capital )?india
+
+- key: fireside
+  label: Fireside Ventures
+  home: https://firesideventures.com/
+  site:
+    via: rss
+    url: https://firesideventures.substack.com/feed
+    note: the site news page links out to this Substack
+  aliases:
+  - fireside
+
+- key: together-fund
+  label: Together Fund
+  home: https://www.together.fund/
+  site:
+    via: scrape
+    url: https://www.together.fund/perspectives
+    link_pattern: /perspectives/
+    note: perspectives page is JavaScript-rendered
+  aliases:
+  - together fund
+
+- key: unicorn-india
+  label: Unicorn India Ventures
+  home: https://www.unicornivc.com/
+  site:
+    via: scrape
+    url: https://www.unicornivc.com/media-and-press
+    note: press page is JavaScript-rendered
+  aliases:
+  - unicorn india ventures
+
+- key: accel
+  label: Accel
+  home: https://www.accel.com/
+  site:
+    via: html
+    url: https://www.accel.com/news
+    link_pattern: accel\.com/news/.
+  aliases:
+  - \baccel\b
+
+- key: elevation
+  label: Elevation Capital
+  home: https://www.elevationcapital.com/
+  site:
+    via: html
+    url: https://www.elevationcapital.com/perspectives
+    link_pattern: /perspectives/.
+  search: '"Elevation Capital" startup funding'
+  aliases:
+  - elevation capital
+  - saif partners
+
+- key: z47
+  label: Z47
+  home: https://www.z47.com/
+  site:
+    via: html
+    url: https://www.z47.com/in-the-news
+    link_pattern: z47\.com/news/.
+  aliases:
+  - \bz47\b
+  - matrix partners( india)?
+
+- key: nexus
+  label: Nexus Venture Partners
+  home: https://nexusvp.com/
+  site:
+    via: rss
+    url: https://nexusvp.com/in/feed/
+  aliases:
+  - nexus venture
+
+- key: blume
+  label: Blume Ventures
+  home: https://blume.vc/
+  site:
+    via: html
+    url: https://blume.vc/news
+    link_pattern: blume\.vc/news/.
+    note: home page returns 403; /news reads fine
+  aliases:
+  - \bblume\b
+
+- key: kalaari
+  label: Kalaari Capital
+  home: https://kalaari.com/
+  site:
+    via: html
+    url: https://kalaari.com/
+    link_pattern: /insights-from-the-fronlines/
+  aliases:
+  - kalaari
+
+- key: lightspeed-india
+  label: Lightspeed India
+  home: https://lsvp.com/
+  site:
+    via: scrape
+    url: https://lsvp.com/stories
+    link_pattern: /stories/.
+    note: site returns 403 to plain HTTP
+  search: '"Lightspeed" India startup funding'
+  aliases:
+  - lightspeed
+
+- key: 3one4
+  label: 3one4 Capital
+  home: https://www.3one4capital.com/
+  site:
+    via: html
+    url: https://www.3one4capital.com/blog
+    link_pattern: /blogs/.
+  aliases:
+  - 3one4
+
+- key: chiratae
+  label: Chiratae Ventures
+  home: https://www.chiratae.com/
+  site:
+    via: rss
+    url: https://www.chiratae.com/feed/
+  aliases:
+  - chiratae
+  - idg ventures india
+
+- key: stellaris
+  label: Stellaris Venture Partners
+  home: https://www.stellarisvp.com/
+  site:
+    via: scrape
+    url: https://www.stellarisvp.com/blog
+    link_pattern: /blog/.
+    note: blog is JavaScript-rendered
+  aliases:
+  - stellaris
+
+- key: endiya
+  label: Endiya Partners
+  home: https://www.endiya.com/
+  site:
+    via: scrape
+    url: https://www.endiya.com/news
+    note: news page is JavaScript-rendered
+  aliases:
+  - endiya
+
+- key: india-quotient
+  label: India Quotient
+  home: https://www.indiaquotient.in/
+  site:
+    via: map
+    url: https://www.indiaquotient.in
+    link_pattern: /founder-resources/.
+    note: posts exist but no listing page
+  search: '"India Quotient" startup funding'
+  aliases:
+  - india quotient
+
+- key: speciale
+  label: Speciale Invest
+  home: https://www.specialeinvest.com/
+  site:
+    via: rss
+    url: https://www.specialeinvest.com/blog-feed.xml
+  aliases:
+  - speciale
+
+- key: prime-vp
+  label: Prime Venture Partners
+  home: https://primevp.in/
+  site:
+    via: map
+    url: https://www.primevp.in
+    link_pattern: /(news-and-announcement|content/blog)/.
+    note: posts exist but no listing page
+  search: '"Prime Venture Partners" funding'
+  aliases:
+  - prime venture
+
+- key: inflexor
+  label: Inflexor Ventures
+  home: https://inflexor.com/
+  site: null
+  no_site: inflexor.com is a parked domain; no firm site found
+  search: '"Inflexor Ventures" funding'
+  aliases:
+  - inflexor
+
+- key: better-capital
+  label: Better Capital
+  home: https://better.capital/
+  site: null
+  no_site: the site's only post is an investor page; no news
+  search: '"Better Capital" startup funding'
+  aliases:
+  - better capital
+
+- key: yali
+  label: Yali Capital
+  home: https://yali.vc/
+  site:
+    via: html
+    url: https://yali.vc/newsroom/
+  aliases:
+  - yali
+
+- key: pi-ventures
+  label: Pi Ventures
+  home: https://pi.ventures/
+  site: null
+  no_site: site does not answer plain HTTP or Firecrawl
+  search: '"pi Ventures" deeptech funding'
+  aliases:
+  - pi ventures
+
+- key: java-capital
+  label: Java Capital
+  home: https://javacapital.in/
+  site: null
+  no_site: javacapital.in is a parked domain; no firm site found
+  search: '"Java Capital" startup funding'
+  aliases:
+  - java capital
+
+- key: axilor
+  label: Axilor Ventures
+  home: https://www.axilor.com/
+  site:
+    via: html
+    url: https://www.axilor.com/news
+  aliases:
+  - axilor
+
+- key: 100x-vc
+  label: 100X.VC
+  home: https://www.100x.vc/
+  site:
+    via: map
+    url: https://www.100x.vc
+    link_pattern: /(news-coverage|blog)/.
+    note: posts exist but no listing page
+  search: '"100X.VC" startup funding'
+  aliases:
+  - 100x\.?vc
+
+- key: rainmatter
+  label: Rainmatter
+  home: https://rainmatter.com/
+  site: null
+  no_site: the site lists backed companies, not news (its /media page is media startups)
+  search: '"Rainmatter" Zerodha startup investment'
+  aliases:
+  - rainmatter
+
+- key: orios
+  label: Orios Venture Partners
+  home: https://oriosvp.com/
+  site:
+    via: rss
+    url: https://oriosvp.com/feed/
+  aliases:
+  - orios
+
+- key: kae
+  label: Kae Capital
+  home: https://kae-capital.com/
+  site:
+    via: html
+    url: https://kae-capital.com/blog/
+    link_pattern: kae-capital\.com/blog/.
+  aliases:
+  - kae capital
+
+- key: exfinity
+  label: Exfinity Venture Partners
+  home: https://www.exfinityventures.com/
+  site:
+    via: html
+    url: https://www.exfinityventures.com/news
+    link_pattern: /media/.
+  aliases:
+  - exfinity
+
+- key: ankur
+  label: Ankur Capital
+  home: https://www.ankurcapital.com/
+  site:
+    via: sitemap
+    url: https://www.ankurcapital.com/sitemap.xml
+    link_pattern: /(post|articles)/.
+    note: insights page is JavaScript-rendered
+  search: '"Ankur Capital" startup funding'
+  aliases:
+  - ankur capital
+
+- key: tiger-global
+  label: Tiger Global
+  home: https://www.tigerglobal.com/
+  site: null
+  no_site: the site has no news pages
+  search: '"Tiger Global" India startup'
+  aliases:
+  - tiger global
+
+- key: softbank
+  label: SoftBank
+  home: https://visionfund.com/
+  site:
+    via: html
+    url: https://visionfund.com/insights
+    link_pattern: /insights/.
+  search: '"SoftBank" India startup investment'
+  aliases:
+  - softbank
+
+- key: general-catalyst-india
+  label: General Catalyst India
+  home: https://www.generalcatalyst.com/
+  site:
+    via: sitemap
+    url: https://www.generalcatalyst.com/sitemap.xml
+    link_pattern: /stories/.
+    note: stories page is JavaScript-rendered
+  search: '"General Catalyst" India startup funding'
+  aliases:
+  - general catalyst
+  - venture highway
+
+- key: a91
+  label: A91 Partners
+  home: https://a91partners.com/
+  site: null
+  no_site: the site has no news pages
+  search: '"A91 Partners" funding'
+  aliases:
+  - \ba91\b
+
+- key: bessemer-india
+  label: Bessemer Venture Partners India
+  home: https://www.bvp.com/
+  site:
+    via: html
+    url: https://www.bvp.com/news
+    link_pattern: bvp\.com/news/.
+  aliases:
+  - bessemer
+
+- key: multiples
+  label: Multiples Alternate Asset Management
+  home: https://www.multiplesequity.com/
+  site: null
+  no_site: the site's blog is an empty template
+  search: '"Multiples Alternate Asset Management" investment'
+  aliases:
+  - multiples (alternate|private equity|pe)
+
+- key: westbridge
+  label: WestBridge Capital
+  home: https://www.westbridgecap.com/
+  site: null
+  no_site: the site's only news pages are placeholders (test-news, test-idea)
+  search: '"WestBridge Capital" investment'
+  aliases:
+  - westbridge
+
+- key: trifecta
+  label: Trifecta Capital
+  home: https://www.trifectacapital.in/
+  site:
+    via: scrape
+    url: https://www.trifectacapital.in/insights
+    note: insights page is JavaScript-rendered
+  search: '"Trifecta Capital" venture debt'
+  aliases:
+  - trifecta
+
+- key: alteria
+  label: Alteria Capital
+  home: https://alteriacapital.com/
+  site:
+    via: rss
+    url: https://alteriacapital.com/feed/
+  aliases:
+  - alteria
+
+- key: ventureast
+  label: Ventureast
+  home: https://www.ventureast.net/
+  site:
+    via: html
+    url: https://www.ventureast.net/
+    note: home page lists press coverage
+  aliases:
+  - ventureast
+
+- key: mayfield-india
+  label: Mayfield India
+  home: https://www.mayfield.com/
+  site:
+    via: scrape
+    url: https://www.mayfield.com/news
+    note: site returns 403 to plain HTTP
+  search: '"Mayfield" India startup funding'
+  aliases:
+  - mayfield
+
+- key: ivycap
+  label: IvyCap Ventures
+  home: https://www.ivycapventures.com/
+  site:
+    via: scrape
+    url: https://www.ivycapventures.com/media
+    note: media page is JavaScript-rendered
+  aliases:
+  - ivycap
+
+- key: info-edge-ventures
+  label: Info Edge Ventures
+  home: https://infoedgeventures.in/
+  site: null
+  no_site: the site has only about, team and companies pages
+  search: '"Info Edge Ventures" funding'
+  aliases:
+  - info ?edge ventures
+  - info ?edge
+
+- key: bharat-innovation-fund
+  label: Bharat Innovation Fund
+  home: https://www.bharatinnovationfund.com/
+  site: null
+  no_site: site does not answer plain HTTP or Firecrawl
+  search: '"Bharat Innovation Fund" funding'
+  aliases:
+  - bharat innovation fund
+
+- key: indian-angel-network
+  label: Indian Angel Network
+  home: https://iangroup.vc/
+  site:
+    via: rss
+    url: https://iangroup.vc/feed/
+  aliases:
+  - indian angel network
+  - \bian (group|fund|angel fund)\b
+
+- key: mumbai-angels
+  label: Mumbai Angels
+  home: https://www.mumbaiangels.com/
+  site: null
+  no_site: the site has only team and ranking pages
+  search: '"Mumbai Angels" funding'
+  aliases:
+  - mumbai angels
+
+- key: venture-catalysts
+  label: Venture Catalysts
+  home: https://www.venturecatalysts.in/
+  site:
+    via: scrape
+    url: https://www.venturecatalysts.in/news-research
+    note: news page is JavaScript-rendered
+  aliases:
+  - venture catalysts
+  - \bvcats\b
+
+- key: omnivore
+  label: Omnivore
+  home: https://www.omnivore.vc/
+  site:
+    via: scrape
+    url: https://www.omnivore.vc/news
+    note: site is JavaScript-rendered
+  aliases:
+  - omnivore

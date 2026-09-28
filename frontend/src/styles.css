@@ -278,6 +278,47 @@ button {
 .freshness[data-stale="true"] { color: var(--on-brand-warn); }
 .freshness[data-stale="true"] .pulse { background: var(--accent); }
 
+.masthead-right { display: flex; align-items: center; gap: var(--s3); }
+
+/* "Refresh now": a quiet control -- the scheduler still does the routine work. */
+.refresh-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 var(--s3);
+  border-radius: var(--r-sm);
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease),
+    border-color var(--dur) var(--ease);
+}
+
+.refresh-btn:disabled { cursor: progress; }
+
+.refresh-btn--dark {
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  color: var(--surface);
+}
+
+.refresh-btn--dark:not(:disabled):hover { background: rgba(255, 255, 255, 0.12); }
+
+.refresh-btn--light {
+  height: 34px;
+  border: 1px solid var(--rule);
+  background: var(--surface);
+  color: var(--brand);
+}
+
+.refresh-btn--light:not(:disabled):hover { border-color: var(--brand); background: var(--page); }
+.refresh-btn--light:disabled { color: var(--ink-mid); }
+
+.refresh-spin { animation: refresh-spin 1s linear infinite; }
+
+@keyframes refresh-spin { to { transform: rotate(360deg); } }
+
 /* Deal volume per day. Also a date filter. */
 
 .activity {
@@ -2034,6 +2075,77 @@ button {
 .ins-soon h2 { margin: 0 0 var(--s1); font-size: 17px; color: var(--brand); }
 .ins-soon p { margin: 0; font-size: 13.5px; color: var(--ink-mid); }
 
+/* --- Insights > VC firms ------------------------------------------------- */
+
+.vc-select select {
+  height: 32px;
+  max-width: 260px;
+  padding: 0 var(--s2);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-sm);
+  background: var(--page);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12.5px;
+}
+
+.vc-select select:focus {
+  border-color: var(--brand);
+  outline: none;
+  background: var(--surface);
+  box-shadow: 0 0 0 3px var(--wash);
+}
+
+.vc-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--ink-mid);
+  cursor: pointer;
+}
+
+.vc-toggle input { accent-color: var(--brand); }
+
+.vc-firm-note { margin: var(--s3) var(--s5) 0; font-size: 12.5px; color: var(--ink-mid); }
+.vc-firm-note a { font-weight: 600; color: var(--brand); }
+.vc-firm-note a:hover { text-decoration: underline; }
+.vc-error { color: var(--accent-ink); }
+.vc-no-site { color: var(--ink-soft); }
+
+.vc-firm { font-weight: 600; white-space: nowrap; }
+
+.vc-news { min-width: 260px; }
+.vc-news a { color: var(--ink); font-weight: 500; }
+.vc-news a:hover { color: var(--brand); text-decoration: underline; }
+.vc-company { display: block; margin-top: 2px; font-size: 12px; color: var(--ink-soft); }
+
+.vc-kind {
+  display: inline-block;
+  padding: 0 6px;
+  border-left: 3px solid var(--wash);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  line-height: 18px;
+}
+
+.vc-kind--brand { border-color: var(--brand); color: var(--brand); }
+.vc-kind--brand-2 { border-color: var(--brand-2); color: var(--brand-2-ink); }
+.vc-kind--accent { border-color: var(--accent); color: var(--accent-ink); }
+.vc-kind--wash { color: var(--ink-soft); }
+
+.vc-round { display: block; margin-top: 2px; font-size: 12px; color: var(--ink-soft); }
+
+.vc-news-tag { background: var(--wash); color: var(--brand); }
+
+.vc-sources { margin: var(--s4) var(--s5) var(--s5); font-size: 12.5px; color: var(--ink-mid); }
+.vc-sources summary { cursor: pointer; font-weight: 600; color: var(--brand); }
+.vc-sources ul { margin: var(--s2) 0 0; padding: 0; list-style: none; columns: 2 320px; }
+.vc-sources li .vc-firm-note { margin: 0 0 var(--s1); }
+
 /* ── Responsive ───────────────────────────────────────────────────────── */
 
 @media (max-width: 1100px) {
@@ -2058,6 +2170,8 @@ button {
   }
   .masthead { margin: 0 calc(var(--s4) * -1) var(--s4); padding: 0 var(--s4); }
   .masthead-left { gap: var(--s3); }
+  .refresh-btn--dark { padding: 0 var(--s2); }
+  .refresh-btn--dark .refresh-label { display: none; }
   .wordmark .wordmark-sub { display: none; }
   .fc-head, .fc-result { padding: var(--s3) var(--s4); }
   .fc-result-main { grid-template-columns: 28px minmax(0, 1fr); }
@@ -2089,6 +2203,8 @@ button {
   .ins-side h2 { display: none; }
   .ins-side-item { width: auto; white-space: nowrap; gap: var(--s2); }
   .ins-head, .ins-tabs, .ins-filter { padding-left: var(--s4); padding-right: var(--s4); }
+  .vc-toggle { margin-left: 0; }
+  .vc-firm-note, .vc-sources { margin-left: var(--s4); margin-right: var(--s4); }
   .x-form-foot { flex-direction: column; }
   .sidebar { position: static; max-height: none; margin-top: var(--s4); }
   .sidebar-body { overflow: visible; }
