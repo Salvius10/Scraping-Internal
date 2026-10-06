@@ -6,6 +6,7 @@ import {
 import { approxFmt, istDay, PRESETS, publishedFmt, showDay } from "./dates";
 import { useRefreshSync } from "./useRefreshSync";
 import VcFirms from "./VcFirms";
+import Events from "./Events";
 import DownloadIcon from "./DownloadIcon";
 import RefreshButton from "./RefreshButton";
 
@@ -30,7 +31,7 @@ type Section = "startups" | "vcs" | "events";
 const SECTIONS: { key: Section; label: string; ready: boolean }[] = [
   { key: "startups", label: "Startup firms", ready: true },
   { key: "vcs", label: "VC firms", ready: true },
-  { key: "events", label: "Events organised", ready: false },
+  { key: "events", label: "Events organised", ready: true },
 ];
 
 function StartupFirms() {
@@ -317,6 +318,7 @@ export default function Insights() {
       </nav>
       {section === "startups" && <StartupFirms />}
       {section === "vcs" && <VcFirms />}
+      {section === "events" && <Events />}
       {!active.ready && <ComingSoon label={active.label} />}
     </div>
   );

@@ -671,7 +671,7 @@ same phrase is **never recompiled**.
 #### `api/insights.py` + `ingest/rounds.py` — Insights: startup funding
 
 A third section in the navbar, **Insights**, with its own side menu: **Startup
-firms** (built), **VC firms** and **Events organised** (placeholders, planned).
+firms**, **VC firms** and **Events organised**, all built.
 
 Startup firms lists every company that raised money, newest first, in tabs:
 **Pre-Seed · Seed · Series A · Series B · Other rounds**. Each row shows
@@ -756,6 +756,94 @@ search result, then the news round. "Found via" filters to Firm website, News
 search or News feed. Only `Other` (essays, podcasts, events) is hidden by
 default. Firecrawl costs about 59 credits per round of reads (10 scrapes, 3
 maps, 23 searches at ~2), so about 1,800 a month at the 24-hour default.
+
+#### `api/events.py` + `ingest/events.py` — Insights: Events organised
+
+Events the tracked VC firms run (demo days, open houses, meetups, summits),
+upcoming and past, plus events on any website the reader pastes on the page.
+Two kinds of source:
+
+| via | read with | cost |
+|---|---|---|
+| `luma` — a Luma calendar | Apify actor `dami_studio~luma-events-scraper` (`search/apify.py`): structured events, no model | ~$0.002 per event, in Apify |
+| `page` — any other events page | Firecrawl scrape, then gpt-oss lists the events in the page text | 1 credit + ~$0.001 (ledgered as `events_page`) |
+
+Every one of the 50 firms is listed on the page. Their sources live in
+`vc_firms.yaml` under `events:`, found 2026-10-06 by scanning each firm's site
+and probing Luma names (all free); a firm with none records why in
+`no_events` where known, and the page offers "Add one" for it:
+
+| via | firms |
+|---|---|
+| `luma` (Apify) | Peak XV, Accel Atoms, General Catalyst (`india_only`), Elevation, Kae, Together Fund |
+| `page` (Firecrawl) | Blume, Z47, Rainmatter (Climate Connect): Luma calendars with only a `/calendar/cal-...` address |
+| `html` (free fetch) | Fireside, Venture Catalysts: their own events pages |
+| `site: true` home page | 43 firms -- every firm with a live site (30 `html`, 13 `page`; 7 global firms `india_only`) |
+
+**Every firm's own website** is a source too (`site: true`): checked every
+`events_site_hours` (168, weekly), and sent to gpt-oss only when its text
+names an event word *and* a date (`mentions_events`), so most home pages cost
+nothing. The first run read 44 home pages for 13 Firecrawl credits and
+$0.0037 of LLM; 7 passed the check and one (Alteria) listed events. Five
+firms have no readable site and say why in `no_events`: parked domains
+(Inflexor, Java Capital), domains that do not resolve (pi Ventures, Bharat
+Innovation Fund), and Mumbai Angels, which refuses plain HTTP and every
+Firecrawl engine. Firecrawl page reads go one at a time, with one retry after
+a 20 s wait on a rate limit: four at once hit it on that first run. The model
+is told to leave out other organisers' conferences where the firm's people
+only speak, and videos -- Alteria's home page listed both.
+
+A third source kind, `html`, is fetched over plain HTTP with Extract's guarded
+fetcher (public addresses, 3 MB) and turned into text with each link kept as
+`[text](url)`; gpt-oss reads it only when it changed, so it costs no credits.
+A Luma page read through Firecrawl shows only upcoming events (past ones sit
+behind a client-side toggle), so `page` calendars collect events as they are
+announced rather than backfilling. Pasted sources live in `event_sources`; a
+pasted Luma link with a short name is read as a calendar.
+
+What the first live run (2026-10-06) found:
+
+- **The actor accepts lu.ma links only.** Luma moved to luma.com, and a
+  luma.com link comes back `BAD_URL` ("That link is not on lu.ma");
+  `actor_url()` rewrites the host, the path is unchanged.
+- **Calendars with no short name cannot be read.** Bessemer's
+  (`/calendar/cal-8RP6LcGzY0D7R8R`, `"slug": null`) returns `NOT_FOUND`, so it
+  was dropped; a pasted `/calendar/cal-...` link is read as a page instead.
+  Antler India's Luma page is a personal profile (`UNSUPPORTED_URL`).
+- **Results:** Peak XV 24 past + 1 upcoming (India, Singapore, UAE, US);
+  Accel Atoms `NO_RESULTS` both ways (Accel posts standalone event pages);
+  General Catalyst 2 past, both in Los Angeles, dropped by `india_only`.
+- **Cost matched the estimate:** $0.002125 an event plus $0.001 a run, charged
+  even on a run that returns nothing. All test runs together: $0.0685.
+- Luma gives some cities in the local script (Dubai as "دبي").
+
+```
+refresh() -> refresh_events()     after VC firms, on every 12h refresh; none with --skip-paid
+  luma   upcoming every events_hours (24); past once per calendar (a backfill --
+         after that, upcoming events turn into past ones in our table)
+         every run capped twice: maxItems and maxTotalChargeUsd (apify_max_charge_usd)
+  page   every events_hours; the model reads the page only when its text changed
+  a failed read is retried next refresh; a re-read updates an event (rescheduled
+  times, venues) rather than adding it again
+GET    /api/insights/events?when=upcoming|past&organiser=&start=&end=
+GET    /api/insights/events.xlsx                   same rows as Excel
+POST   /api/insights/events/sources {url, label?, firm?}   add, then read at once (paid)
+DELETE /api/insights/events/sources/{id}           remove, with its events
+POST   /api/refresh {"scope": "events"}            read the sources that are due
+python -m app.ingest.events --once [--source peak-xv|site-3] [--force]
+```
+
+The model's answer is untrusted: an event needs a title and a readable start
+date, and only http(s) links are kept. A day with no time is stored as
+midnight IST, flagged `date_only`, shown as a day, and counts as upcoming
+until that day ends. An event found in a firm's calendar and a pasted one
+shows once, under the firm. `APIFY_API_TOKEN` goes in `.env`; until it is set
+the page says so and Luma reads fail with that message.
+
+Steady state for the three calendars, measured: one upcoming read each a day
+is $0.003 in run starts plus ~$0.002 per upcoming event -- well under $0.50 a
+month, inside Apify's $5 monthly free usage. The one-off past backfill is at
+most 25 events per calendar (~$0.05 each).
 
 #### `api/buckets.py` — buckets, kept in step with the scheduler
 
@@ -1166,6 +1254,7 @@ are recorded under `intelligence_summary`; Firecrawl credits are billed by Firec
 | `test_scheduler.py` | 10 | Restart does not re-run a fresh feed, runs never overlap, a failing run is survived |
 | `test_extract.py` | 32 | URL guard (private IPs, metadata endpoint, schemes, ports, redirect-to-localhost), size/type limits, HTML cleaning, result shapes, budget checked before any call, cache, one run at a time |
 | `test_storage.py` | 6 | Timestamps come back aware, API emits an offset, activity uses the reader's day, chunk sync |
+| `test_events.py` | 36 | Apify called with both caps and readable errors, Luma rows mapped (diagnostics never stored, global calendars kept to India), a page read by the model once per change, untrusted model output, rescheduled events updated not duplicated, past backfilled once, upcoming/past split, organiser filter, Excel, add/remove pasted sources, the `events` refresh scope |
 
 Two deliberate choices:
 

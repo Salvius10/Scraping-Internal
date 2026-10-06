@@ -322,6 +322,81 @@ class VcRead(Base):
     error: Mapped[str | None] = mapped_column(Text, default=None)
 
 
+class EventSource(Base):
+    """A website the reader pasted on Insights > Events organised.
+
+    The VC firms' own Luma calendars live in `vc_firms.yaml`; these are the
+    extra sources added from the page. `via` is "luma" for a Luma calendar
+    (read through Apify) and "page" for any other page (read through
+    Firecrawl, then gpt-oss lists the events on it).
+    """
+
+    __tablename__ = "event_sources"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    url: Mapped[str] = mapped_column(String(1000), unique=True)
+    label: Mapped[str] = mapped_column(String(200))
+    firm: Mapped[str | None] = mapped_column(String(60), default=None)
+    via: Mapped[str] = mapped_column(String(20))
+    added_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
+
+
+class Event(Base):
+    """One event, from a firm's Luma calendar or a pasted website.
+
+    `uid` identifies the event within its source, so a re-read updates the
+    row (events get rescheduled) instead of adding a second one. Upcoming or
+    past is worked out at read time from the dates, never stored.
+    """
+
+    __tablename__ = "events"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    uid: Mapped[str] = mapped_column(String(40), unique=True, index=True)
+    source_key: Mapped[str] = mapped_column(String(120), index=True)
+    firm: Mapped[str | None] = mapped_column(String(60), index=True, default=None)
+    url: Mapped[str] = mapped_column(String(1000))
+    title: Mapped[str] = mapped_column(Text)
+    starts_at: Mapped[datetime] = mapped_column(UTCDateTime(), index=True)
+    ends_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), default=None)
+    date_only: Mapped[bool] = mapped_column(default=False)   # no time was given
+    timezone: Mapped[str | None] = mapped_column(String(60), default=None)
+    venue: Mapped[str | None] = mapped_column(String(300), default=None)
+    city: Mapped[str | None] = mapped_column(String(120), default=None)
+    country: Mapped[str | None] = mapped_column(String(80), default=None)
+    online: Mapped[bool | None] = mapped_column(default=None)
+    host: Mapped[str | None] = mapped_column(String(300), default=None)
+    description: Mapped[str | None] = mapped_column(Text, default=None)
+    via: Mapped[str] = mapped_column(String(20))       # apify | firecrawl
+    found_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
+
+
+class EventRead(Base):
+    """One read of one event source. Shows health on the page, spaces out the
+    paid reads, and records what each one cost.
+
+    kind: "upcoming" / "past" for a Luma calendar, "page" for a website.
+    `content_hash` is the page text read last time, so an unchanged page is
+    not paid for again with a model call.
+    """
+
+    __tablename__ = "event_reads"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    source_key: Mapped[str] = mapped_column(String(120), index=True)
+    kind: Mapped[str] = mapped_column(String(20))
+    started_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow,
+                                                 index=True)
+    items_seen: Mapped[int] = mapped_column(Integer, default=0)
+    items_new: Mapped[int] = mapped_column(Integer, default=0)
+    apify_usd: Mapped[float] = mapped_column(Float, default=0.0)   # estimated
+    credits_used: Mapped[int] = mapped_column(Integer, default=0)  # Firecrawl
+    llm_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    content_hash: Mapped[str | None] = mapped_column(String(40), default=None)
+    error: Mapped[str | None] = mapped_column(Text, default=None)
+
+
 class FilterCache(Base):
     """Natural-language filter phrase -> compiled JSON filter.
 

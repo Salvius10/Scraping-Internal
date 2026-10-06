@@ -18,8 +18,8 @@ from fastapi.staticfiles import StaticFiles
 
 from . import scheduler
 from .api import (
-    buckets, chat, extract, feed, filter as filter_api, insights, intelligence, refresh,
-    status, vcs,
+    buckets, chat, events, extract, feed, filter as filter_api, insights, intelligence,
+    refresh, status, vcs,
 )
 from .config import BACKEND_DIR, settings
 from .db import init_db
@@ -45,6 +45,7 @@ app.include_router(feed.router)
 app.include_router(buckets.router)
 app.include_router(insights.router)
 app.include_router(vcs.router)
+app.include_router(events.router)
 app.include_router(status.router)
 app.include_router(refresh.router)
 app.include_router(filter_api.router)

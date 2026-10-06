@@ -115,6 +115,31 @@ class Read:
         return self.via in SITE_VIAS
 
 
+EVENT_VIAS = ("luma", "page", "html")
+
+
+@dataclass(frozen=True)
+class EventsAt:
+    """Where a firm lists the events it organises (Insights > Events organised).
+
+    luma  a Luma calendar with a short name, read through Apify
+    page  any other events page, read through Firecrawl (JavaScript-built pages,
+          and Luma calendars that only have a /calendar/cal-... address)
+    html  an events page readable over plain HTTP: fetched free
+    For page and html, gpt-oss lists the events, only when the text changed.
+    `india_only` keeps only events in India, for a global firm's calendar.
+    `site` marks the firm's own home page rather than an events page or
+    calendar: checked less often (`events_site_hours`), and only sent to the
+    model when its text mentions an event and a date.
+    """
+
+    via: str
+    url: str
+    india_only: bool = False
+    site: bool = False
+    note: str | None = None
+
+
 @dataclass(frozen=True)
 class VcFirm:
     key: str
@@ -124,6 +149,8 @@ class VcFirm:
     search: Read | None = None         # news about it from other outlets
     no_site: str | None = None         # why there is no site news to read
     aliases: tuple[str, ...] = ()
+    events: tuple[EventsAt, ...] = ()  # where it lists its own events
+    no_events: str | None = None       # why there is no events source, when known
 
     @property
     def reads(self) -> tuple[Read, ...]:
@@ -147,10 +174,20 @@ def _parse(raw: dict) -> VcFirm:
     elif not raw.get("no_site"):
         raise ValueError(f"{key}: give a site read, or say why not in no_site")
     query = raw.get("search")
+    events = []
+    for entry in raw.get("events") or ():
+        if entry.get("via") not in EVENT_VIAS or not entry.get("url"):
+            raise ValueError(f"{key}: an events entry needs via (luma, page or html) and a url")
+        if entry.get("site") and entry["via"] == "luma":
+            raise ValueError(f"{key}: a firm website is read as html or page, not luma")
+        events.append(EventsAt(via=entry["via"], url=entry["url"],
+                               india_only=bool(entry.get("india_only")),
+                               site=bool(entry.get("site")), note=entry.get("note")))
     return VcFirm(
         key=key, label=raw.get("label", key), home=raw["home"], site=site or None,
         search=Read(via="search", query=query) if query else None,
         no_site=raw.get("no_site"), aliases=tuple(raw.get("aliases") or ()),
+        events=tuple(events), no_events=raw.get("no_events"),
     )
 
 

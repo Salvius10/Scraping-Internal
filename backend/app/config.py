@@ -52,6 +52,28 @@ class Settings(BaseSettings):
     vc_firecrawl_hours: int = 24
     vc_items_per_firm: int = 30       # newest posts taken from each read
 
+    # --- Insights: Events organised (ingest/events.py) ---
+    # Luma calendars are read through an Apify Store actor, billed per event
+    # returned in Apify's own account -- separate from the $7 LLM cap, like
+    # Firecrawl. Set the token in .env (gitignored).
+    apify_api_token: str | None = None
+    apify_api_url: str = "https://api.apify.com"
+    apify_luma_actor: str = "dami_studio~luma-events-scraper"
+    apify_timeout: int = 240          # seconds; the sync endpoint gives up at 300
+    # Measured on the actor's page, 2026-10: $2.125 per 1,000 events, and a
+    # run start is charged at most $0.001. Used to estimate and cap each run.
+    apify_price_per_event: float = 0.002125
+    apify_price_per_run: float = 0.001
+    # Hard ceiling on what one Apify run may charge, passed as maxTotalChargeUsd.
+    apify_max_charge_usd: float = 0.10
+    # Each source is read at most this often; a failed read does not count.
+    events_hours: int = 24
+    # A firm's own home page rarely lists events, so it is checked weekly. It
+    # is only sent to the model when its text mentions an event and a date.
+    events_site_hours: int = 168
+    events_upcoming_items: int = 25   # upcoming events taken per Luma read
+    events_past_items: int = 25       # past events, read once per calendar
+
     # --- HTTP ---
     user_agent: str = (
         "IndiaStartupNewsBot/0.1 (+aggregator; contact: melvinsalvius@gmail.com)"

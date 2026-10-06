@@ -19,6 +19,8 @@ os.environ["DB_PATH"] = str(_TMP_DB)
 os.environ["LLM_DRY_RUN"] = "false"
 # Starting the app in a test must never kick off a real, paid ingest.
 os.environ["SCHEDULER_ENABLED"] = "false"
+# Nor run a real Apify actor: tests that need a token set a fake one.
+os.environ["APIFY_API_TOKEN"] = ""
 
 import pytest  # noqa: E402
 

@@ -2146,6 +2146,53 @@ button {
 .vc-sources ul { margin: var(--s2) 0 0; padding: 0; list-style: none; columns: 2 320px; }
 .vc-sources li .vc-firm-note { margin: 0 0 var(--s1); }
 
+/* --- Insights > Events organised ----------------------------------------- */
+
+/* Add a website: the paid action on this page, so its button is the orange one. */
+.ev-add {
+  display: grid;
+  gap: var(--s2);
+  margin: var(--s3) var(--s5) 0;
+  padding: var(--s3) var(--s4);
+  border: 1px solid var(--rule);
+  border-radius: var(--r);
+  background: var(--page);
+}
+
+.ev-add h3 { margin: 0; font-size: 13.5px; font-weight: 600; color: var(--brand); }
+.ev-add .side-note, .ev-add .fc-scraping { margin: 0; }
+
+.ev-add-row { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; }
+.ev-add-row .side-input { width: auto; }
+.ev-url { flex: 2 1 280px; }
+.ev-label { flex: 1 1 160px; }
+.ev-go { margin-left: 0; }
+
+.ins-download[aria-pressed="true"] { background: var(--wash); }
+
+.ev-desc { max-width: 520px; }
+.ev-where { min-width: 120px; color: var(--ink-mid); }
+
+.ev-remove {
+  margin-left: var(--s2);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent-ink);
+}
+
+.ev-remove:hover { text-decoration: underline; }
+
+.ev-add-for {
+  margin-left: var(--s2);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--brand);
+}
+
+.ev-add-for:hover { text-decoration: underline; }
+
+.ev-sourceless-note { margin: var(--s2) 0 0; }
+
 /* ── Responsive ───────────────────────────────────────────────────────── */
 
 @media (max-width: 1100px) {
@@ -2205,6 +2252,8 @@ button {
   .ins-head, .ins-tabs, .ins-filter { padding-left: var(--s4); padding-right: var(--s4); }
   .vc-toggle { margin-left: 0; }
   .vc-firm-note, .vc-sources { margin-left: var(--s4); margin-right: var(--s4); }
+  .ev-add { margin-left: var(--s4); margin-right: var(--s4); }
+  .ev-add-row .side-input, .ev-go { flex: 1 1 100%; }
   .x-form-foot { flex-direction: column; }
   .sidebar { position: static; max-height: none; margin-top: var(--s4); }
   .sidebar-body { overflow: visible; }

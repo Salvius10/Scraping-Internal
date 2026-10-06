@@ -21,6 +21,22 @@
 # aliases: regexes (case-insensitive) matched against the investors named in
 # funding rounds from the news feed, so deals reported by the press show under
 # the firm too. Free.
+#
+# events: where the firm lists the events it organises, for Insights > Events
+# organised. Found on 2026-10-06; read at most every `events_hours`.
+#   luma   a Luma calendar with a short name (luma.com/<name>), via Apify ~$0.002/event
+#          A personal Luma profile is not a calendar and cannot be read.
+#   page   any other events page, read through Firecrawl, then gpt-oss
+#          lists the events on it                                 1 credit + ~$0.001
+#          (also a Luma calendar with only a /calendar/cal-... address)
+#   html   an events page plain HTTP can read: free, then gpt-oss      ~$0.001
+#   The model only reads a page again when its text has changed.
+#   site: true marks the firm's own home page (every firm with a live site has
+#          one): checked weekly (`events_site_hours`), and sent to the model
+#          only when its text names an event and a date -- usually free.
+#   india_only: true keeps only events in India, for a global firm.
+# no_events: why a firm has no events source, when known. Every firm is listed
+# under Events organised either way; more sources can be pasted on the page.
 
 firms:
 
@@ -35,6 +51,10 @@ firms:
   search: '"Antler" India startup funding'
   aliases:
   - \bantler\b
+  events:
+  - via: html
+    url: https://www.antler.co/location/india
+    site: true
 
 - key: titan-capital
   label: Titan Capital
@@ -45,6 +65,10 @@ firms:
     link_pattern: /blogs/
   aliases:
   - titan capital
+  events:
+  - via: html
+    url: https://titancapital.vc/
+    site: true
 
 - key: peak-xv
   label: Peak XV Partners
@@ -56,6 +80,13 @@ firms:
   aliases:
   - peak ?xv
   - sequoia (capital )?india
+  events:
+  - via: luma
+    url: https://luma.com/peakxvpartners
+    note: India and South-East Asia; Surge open houses and founder events
+  - via: html
+    url: https://www.peakxv.com/
+    site: true
 
 - key: fireside
   label: Fireside Ventures
@@ -66,6 +97,10 @@ firms:
     note: the site news page links out to this Substack
   aliases:
   - fireside
+  events:
+  - via: html
+    url: https://firesideventures.com/pages/events
+    note: the firm's own events page, dated, readable over plain HTTP
 
 - key: together-fund
   label: Together Fund
@@ -77,6 +112,13 @@ firms:
     note: perspectives page is JavaScript-rendered
   aliases:
   - together fund
+  events:
+  - via: luma
+    url: https://luma.com/togetherfund
+    note: India and US
+  - via: html
+    url: https://www.together.fund/
+    site: true
 
 - key: unicorn-india
   label: Unicorn India Ventures
@@ -87,6 +129,10 @@ firms:
     note: press page is JavaScript-rendered
   aliases:
   - unicorn india ventures
+  events:
+  - via: html
+    url: https://www.unicornivc.com/
+    site: true
 
 - key: accel
   label: Accel
@@ -97,6 +143,15 @@ firms:
     link_pattern: accel\.com/news/.
   aliases:
   - \baccel\b
+  events:
+  - via: luma
+    url: https://luma.com/AccelAtoms
+    note: Accel Atoms, Accel India's seed programme
+  - via: page
+    url: https://www.accel.com/
+    site: true
+    india_only: true
+    note: home page is built in the browser, so Firecrawl reads it
 
 - key: elevation
   label: Elevation Capital
@@ -109,6 +164,12 @@ firms:
   aliases:
   - elevation capital
   - saif partners
+  events:
+  - via: luma
+    url: https://luma.com/elevationcapital
+  - via: html
+    url: https://www.elevationcapital.com/
+    site: true
 
 - key: z47
   label: Z47
@@ -120,6 +181,13 @@ firms:
   aliases:
   - \bz47\b
   - matrix partners( india)?
+  events:
+  - via: page
+    url: https://luma.com/calendar/cal-FrrKiDclTf2jJVL
+    note: a Luma calendar with no short name, which Apify cannot read, so Firecrawl reads the page
+  - via: html
+    url: https://www.z47.com/
+    site: true
 
 - key: nexus
   label: Nexus Venture Partners
@@ -129,6 +197,10 @@ firms:
     url: https://nexusvp.com/in/feed/
   aliases:
   - nexus venture
+  events:
+  - via: html
+    url: https://nexusvp.com/
+    site: true
 
 - key: blume
   label: Blume Ventures
@@ -140,6 +212,14 @@ firms:
     note: home page returns 403; /news reads fine
   aliases:
   - \bblume\b
+  events:
+  - via: page
+    url: https://luma.com/calendar/cal-PyKq23m6uJV2wyy
+    note: a Luma calendar with no short name, which Apify cannot read, so Firecrawl reads the page
+  - via: page
+    url: https://blume.vc/
+    site: true
+    note: home page refuses plain HTTP (403), so Firecrawl reads it
 
 - key: kalaari
   label: Kalaari Capital
@@ -150,6 +230,10 @@ firms:
     link_pattern: /insights-from-the-fronlines/
   aliases:
   - kalaari
+  events:
+  - via: html
+    url: https://kalaari.com/
+    site: true
 
 - key: lightspeed-india
   label: Lightspeed India
@@ -162,6 +246,12 @@ firms:
   search: '"Lightspeed" India startup funding'
   aliases:
   - lightspeed
+  events:
+  - via: page
+    url: https://lsvp.com/
+    site: true
+    india_only: true
+    note: home page refuses plain HTTP (403), so Firecrawl reads it
 
 - key: 3one4
   label: 3one4 Capital
@@ -172,6 +262,10 @@ firms:
     link_pattern: /blogs/.
   aliases:
   - 3one4
+  events:
+  - via: html
+    url: https://www.3one4capital.com/
+    site: true
 
 - key: chiratae
   label: Chiratae Ventures
@@ -182,6 +276,10 @@ firms:
   aliases:
   - chiratae
   - idg ventures india
+  events:
+  - via: html
+    url: https://www.chiratae.com/
+    site: true
 
 - key: stellaris
   label: Stellaris Venture Partners
@@ -193,6 +291,10 @@ firms:
     note: blog is JavaScript-rendered
   aliases:
   - stellaris
+  events:
+  - via: html
+    url: https://www.stellarisvp.com/
+    site: true
 
 - key: endiya
   label: Endiya Partners
@@ -203,6 +305,10 @@ firms:
     note: news page is JavaScript-rendered
   aliases:
   - endiya
+  events:
+  - via: html
+    url: https://www.endiya.com/
+    site: true
 
 - key: india-quotient
   label: India Quotient
@@ -215,6 +321,10 @@ firms:
   search: '"India Quotient" startup funding'
   aliases:
   - india quotient
+  events:
+  - via: html
+    url: https://www.indiaquotient.in/
+    site: true
 
 - key: speciale
   label: Speciale Invest
@@ -224,6 +334,11 @@ firms:
     url: https://www.specialeinvest.com/blog-feed.xml
   aliases:
   - speciale
+  events:
+  - via: page
+    url: https://www.specialeinvest.com/
+    site: true
+    note: home page is over 3 MB over plain HTTP, so Firecrawl reads it
 
 - key: prime-vp
   label: Prime Venture Partners
@@ -236,6 +351,11 @@ firms:
   search: '"Prime Venture Partners" funding'
   aliases:
   - prime venture
+  events:
+  - via: page
+    url: https://www.primevp.in/
+    site: true
+    note: primevp.in answers 404; the www site is read through Firecrawl
 
 - key: inflexor
   label: Inflexor Ventures
@@ -245,6 +365,7 @@ firms:
   search: '"Inflexor Ventures" funding'
   aliases:
   - inflexor
+  no_events: inflexor.com is a parked domain; no firm site to read
 
 - key: better-capital
   label: Better Capital
@@ -254,6 +375,11 @@ firms:
   search: '"Better Capital" startup funding'
   aliases:
   - better capital
+  events:
+  - via: page
+    url: https://better.capital/
+    site: true
+    note: home page is built in the browser, so Firecrawl reads it
 
 - key: yali
   label: Yali Capital
@@ -263,6 +389,10 @@ firms:
     url: https://yali.vc/newsroom/
   aliases:
   - yali
+  events:
+  - via: html
+    url: https://yali.vc/
+    site: true
 
 - key: pi-ventures
   label: Pi Ventures
@@ -272,6 +402,7 @@ firms:
   search: '"pi Ventures" deeptech funding'
   aliases:
   - pi ventures
+  no_events: pi.ventures does not resolve; no firm site to read
 
 - key: java-capital
   label: Java Capital
@@ -281,6 +412,7 @@ firms:
   search: '"Java Capital" startup funding'
   aliases:
   - java capital
+  no_events: javacapital.in is a parked domain; no firm site to read
 
 - key: axilor
   label: Axilor Ventures
@@ -290,6 +422,10 @@ firms:
     url: https://www.axilor.com/news
   aliases:
   - axilor
+  events:
+  - via: html
+    url: https://www.axilor.com/
+    site: true
 
 - key: 100x-vc
   label: 100X.VC
@@ -302,6 +438,11 @@ firms:
   search: '"100X.VC" startup funding'
   aliases:
   - 100x\.?vc
+  events:
+  - via: page
+    url: https://www.100x.vc/
+    site: true
+    note: home page is built in the browser, so Firecrawl reads it
 
 - key: rainmatter
   label: Rainmatter
@@ -311,6 +452,13 @@ firms:
   search: '"Rainmatter" Zerodha startup investment'
   aliases:
   - rainmatter
+  events:
+  - via: page
+    url: https://luma.com/calendar/cal-EBqImAEpthO8Mz5
+    note: Climate Connect, an offline series by Rainmatter Foundation; no short name, so Firecrawl
+  - via: html
+    url: https://rainmatter.com/
+    site: true
 
 - key: orios
   label: Orios Venture Partners
@@ -320,6 +468,11 @@ firms:
     url: https://oriosvp.com/feed/
   aliases:
   - orios
+  events:
+  - via: page
+    url: https://oriosvp.com/
+    site: true
+    note: home page is over 3 MB over plain HTTP, so Firecrawl reads it
 
 - key: kae
   label: Kae Capital
@@ -330,6 +483,12 @@ firms:
     link_pattern: kae-capital\.com/blog/.
   aliases:
   - kae capital
+  events:
+  - via: luma
+    url: https://luma.com/kaecapital
+  - via: html
+    url: https://kae-capital.com/
+    site: true
 
 - key: exfinity
   label: Exfinity Venture Partners
@@ -340,6 +499,10 @@ firms:
     link_pattern: /media/.
   aliases:
   - exfinity
+  events:
+  - via: html
+    url: https://www.exfinityventures.com/
+    site: true
 
 - key: ankur
   label: Ankur Capital
@@ -352,6 +515,10 @@ firms:
   search: '"Ankur Capital" startup funding'
   aliases:
   - ankur capital
+  events:
+  - via: html
+    url: https://www.ankurcapital.com/
+    site: true
 
 - key: tiger-global
   label: Tiger Global
@@ -361,6 +528,12 @@ firms:
   search: '"Tiger Global" India startup'
   aliases:
   - tiger global
+  events:
+  - via: page
+    url: https://www.tigerglobal.com/
+    site: true
+    india_only: true
+    note: home page is built in the browser, so Firecrawl reads it
 
 - key: softbank
   label: SoftBank
@@ -372,6 +545,11 @@ firms:
   search: '"SoftBank" India startup investment'
   aliases:
   - softbank
+  events:
+  - via: html
+    url: https://visionfund.com/
+    site: true
+    india_only: true
 
 - key: general-catalyst-india
   label: General Catalyst India
@@ -385,6 +563,15 @@ firms:
   aliases:
   - general catalyst
   - venture highway
+  events:
+  - via: luma
+    url: https://luma.com/generalcatalyst
+    india_only: true
+    note: one global calendar (SF, NYC, Boston, London, India)
+  - via: html
+    url: https://www.generalcatalyst.com/
+    site: true
+    india_only: true
 
 - key: a91
   label: A91 Partners
@@ -394,6 +581,10 @@ firms:
   search: '"A91 Partners" funding'
   aliases:
   - \ba91\b
+  events:
+  - via: html
+    url: https://a91partners.com/
+    site: true
 
 - key: bessemer-india
   label: Bessemer Venture Partners India
@@ -404,6 +595,13 @@ firms:
     link_pattern: bvp\.com/news/.
   aliases:
   - bessemer
+  # Its Luma calendar (luma.com/calendar/cal-8RP6LcGzY0D7R8R) has no short name,
+  # so Apify cannot read it (NOT_FOUND, 2026-10-06).
+  events:
+  - via: html
+    url: https://www.bvp.com/
+    site: true
+    india_only: true
 
 - key: multiples
   label: Multiples Alternate Asset Management
@@ -413,6 +611,11 @@ firms:
   search: '"Multiples Alternate Asset Management" investment'
   aliases:
   - multiples (alternate|private equity|pe)
+  events:
+  - via: page
+    url: https://www.multiplesequity.com/
+    site: true
+    note: home page is built in the browser, so Firecrawl reads it
 
 - key: westbridge
   label: WestBridge Capital
@@ -422,6 +625,10 @@ firms:
   search: '"WestBridge Capital" investment'
   aliases:
   - westbridge
+  events:
+  - via: html
+    url: https://www.westbridgecap.com/
+    site: true
 
 - key: trifecta
   label: Trifecta Capital
@@ -433,6 +640,10 @@ firms:
   search: '"Trifecta Capital" venture debt'
   aliases:
   - trifecta
+  events:
+  - via: html
+    url: https://www.trifectacapital.in/
+    site: true
 
 - key: alteria
   label: Alteria Capital
@@ -442,6 +653,10 @@ firms:
     url: https://alteriacapital.com/feed/
   aliases:
   - alteria
+  events:
+  - via: html
+    url: https://alteriacapital.com/
+    site: true
 
 - key: ventureast
   label: Ventureast
@@ -452,6 +667,10 @@ firms:
     note: home page lists press coverage
   aliases:
   - ventureast
+  events:
+  - via: html
+    url: https://www.ventureast.net/
+    site: true
 
 - key: mayfield-india
   label: Mayfield India
@@ -463,6 +682,12 @@ firms:
   search: '"Mayfield" India startup funding'
   aliases:
   - mayfield
+  events:
+  - via: page
+    url: https://www.mayfield.com/
+    site: true
+    india_only: true
+    note: home page refuses plain HTTP (403), so Firecrawl reads it
 
 - key: ivycap
   label: IvyCap Ventures
@@ -473,6 +698,10 @@ firms:
     note: media page is JavaScript-rendered
   aliases:
   - ivycap
+  events:
+  - via: html
+    url: https://www.ivycapventures.com/
+    site: true
 
 - key: info-edge-ventures
   label: Info Edge Ventures
@@ -483,6 +712,11 @@ firms:
   aliases:
   - info ?edge ventures
   - info ?edge
+  events:
+  - via: page
+    url: https://infoedgeventures.in/
+    site: true
+    note: home page is built in the browser, so Firecrawl reads it
 
 - key: bharat-innovation-fund
   label: Bharat Innovation Fund
@@ -492,6 +726,7 @@ firms:
   search: '"Bharat Innovation Fund" funding'
   aliases:
   - bharat innovation fund
+  no_events: bharatinnovationfund.com does not resolve; no firm site to read
 
 - key: indian-angel-network
   label: Indian Angel Network
@@ -502,6 +737,10 @@ firms:
   aliases:
   - indian angel network
   - \bian (group|fund|angel fund)\b
+  events:
+  - via: html
+    url: https://iangroup.vc/
+    site: true
 
 - key: mumbai-angels
   label: Mumbai Angels
@@ -511,6 +750,7 @@ firms:
   search: '"Mumbai Angels" funding'
   aliases:
   - mumbai angels
+  no_events: mumbaiangels.com refuses plain HTTP (403) and every Firecrawl engine (2026-10-06)
 
 - key: venture-catalysts
   label: Venture Catalysts
@@ -522,6 +762,10 @@ firms:
   aliases:
   - venture catalysts
   - \bvcats\b
+  events:
+  - via: html
+    url: https://www.venturecatalysts.in/events
+    note: its own event calendar, readable over plain HTTP (days are given without a year)
 
 - key: omnivore
   label: Omnivore
@@ -532,3 +776,8 @@ firms:
     note: site is JavaScript-rendered
   aliases:
   - omnivore
+  events:
+  - via: page
+    url: https://www.omnivore.vc/
+    site: true
+    note: home page is built in the browser, so Firecrawl reads it

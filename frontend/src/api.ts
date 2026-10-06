@@ -243,7 +243,77 @@ export interface VcQuery extends DateRange {
   all?: boolean;
 }
 
-export type RefreshScope = "feed" | "vcs";
+export type EventWhen = "upcoming" | "past";
+
+export interface EventItem {
+  id: number;
+  title: string;
+  url: string;
+  starts_at: string;
+  ends_at: string | null;
+  date_only: boolean;          // the source gave a day, no time
+  timezone: string | null;
+  venue: string | null;
+  city: string | null;
+  country: string | null;
+  online: boolean | null;
+  host: string | null;
+  description: string | null;
+  organiser: string;
+  organiser_key: string;
+  source_key: string;
+  via_label: string;
+}
+
+export interface EventSourceInfo {
+  key: string;
+  label: string;
+  url: string;
+  via: "luma" | "page" | "html";
+  via_label: string;
+  firm: string | null;
+  custom: boolean;             // pasted on the page, so it can be removed
+  site: boolean;               // the firm's own home page, checked weekly
+  id: number | null;
+  india_only: boolean;
+  note: string | null;
+  events: number;
+  last_read: string | null;
+  last_error: string | null;
+}
+
+export interface EventsResponse {
+  when: EventWhen;
+  organiser: string | null;
+  counts: Record<EventWhen, number>;
+  events: EventItem[];
+  organisers: { key: string; label: string; count: number }[];
+  sources: EventSourceInfo[];
+  // Every tracked firm, with how many event sources it has and, when known,
+  // why it has none.
+  firms: { key: string; label: string; sources: number; no_events: string | null }[];
+  apify_ready: boolean;
+  firecrawl_ready: boolean;
+}
+
+export interface EventsQuery extends DateRange {
+  when: EventWhen;
+  organiser?: string;
+}
+
+export interface AddEventSourceResponse {
+  added: boolean;
+  source_key: string | null;
+  via: "luma" | "page" | "html" | null;
+  found: number;
+  new: number;
+  apify_usd: number;
+  credits_used: number;
+  llm_usd: number;
+  error: string | null;
+}
+
+export type RefreshScope = "feed" | "vcs" | "events";
 
 export interface RefreshStatus {
   scope: RefreshScope | null;
@@ -297,6 +367,12 @@ async function post<T>(path: string, body: unknown): Promise<T> {
   return (await response.json()) as T;
 }
 
+async function del<T>(path: string): Promise<T> {
+  const response = await fetch(`/api${path}`, { method: "DELETE" });
+  if (!response.ok) throw new Error(`${path} failed (${response.status})`);
+  return (await response.json()) as T;
+}
+
 export const api = {
   articles: (query: FeedQuery) => get<FeedPage>("/articles", { ...query }),
   facets: () => get<Facets>("/facets"),
@@ -338,6 +414,21 @@ export const api = {
     const q = params.toString();
     return `/api/insights/vcs.xlsx${q ? `?${q}` : ""}`;
   },
+  events: (query: EventsQuery) => get<EventsResponse>("/insights/events", { ...query }),
+  eventsExcelUrl: (query: EventsQuery) => {
+    const params = new URLSearchParams({ when: query.when });
+    if (query.organiser) params.set("organiser", query.organiser);
+    if (query.start) params.set("start", query.start);
+    if (query.end) params.set("end", query.end);
+    return `/api/insights/events.xlsx?${params.toString()}`;
+  },
+  // Paid: the source is read straight away (Apify for Luma, else Firecrawl).
+  addEventSource: (url: string, label?: string, firm?: string) =>
+    post<AddEventSourceResponse>("/insights/events/sources", {
+      url, label: label || undefined, firm: firm || undefined,
+    }),
+  removeEventSource: (id: number) =>
+    del<{ removed: boolean }>(`/insights/events/sources/${id}`),
   webSearch: (query: string, kind: SearchKind) =>
     post<WebSearchResponse>("/intelligence/search", { query, kind }),
   scrapePage: (url: string, query: string) =>

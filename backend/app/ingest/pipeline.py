@@ -1,7 +1,8 @@
 """Ingest orchestration.
 
 `refresh()` is the full run: fetch every source, then describe (free), enrich
-(paid) and dedupe by company (free). The CLI and the 12-hour scheduler
+(paid) and dedupe by company (free), then the Insights steps: funding rounds,
+VC firms and events organised. The CLI and the 12-hour scheduler
 (`app.scheduler`) both call it, so a manual run and a scheduled one are the
 same code path.
 
@@ -151,6 +152,7 @@ class RefreshResult:
     merged: int | None = None
     rounds: object | None = None       # RoundsResult, or None when skipped
     vcs: object | None = None          # VcResult, or None when it failed
+    events: object | None = None       # EventsResult, or None when it failed
     chunks_synced: int = 0
 
     @property
@@ -193,6 +195,15 @@ def refresh(
         result.vcs = refresh_firms(free_only=skip_paid, classify=enrich)
     except Exception:  # noqa: BLE001
         log.exception("vc firms: refresh failed")
+
+    # Insights > Events organised: the firms' Luma calendars (Apify) and pasted
+    # websites (Firecrawl). Every read is paid, each at most every
+    # `events_hours`, so --skip-paid reads none. Never costs the feed its refresh.
+    from .events import refresh_events
+    try:
+        result.events = refresh_events(free_only=skip_paid)
+    except Exception:  # noqa: BLE001
+        log.exception("events: refresh failed")
 
     # Belt and braces: citations must quote what is stored. Free.
     from .chunks import sync_all_chunks
@@ -285,6 +296,12 @@ def main(argv: list[str] | None = None) -> int:
               % (len(v.reads), v.failed, v.new, v.credits))
         if v.classify is not None:
             print("          %d sorted, $%.6f" % (v.classify.classified, v.classify.cost_usd))
+
+    if result.events is not None:
+        ev = result.events
+        print("events:   %d read (%d failed), %d new events, ~$%.4f Apify, "
+              "%d Firecrawl credits, $%.6f LLM"
+              % (len(ev.reads), ev.failed, ev.new, ev.apify_usd, ev.credits, ev.llm_usd))
 
     if result.chunks_synced:
         print("chunks:   %d citation passages brought up to date (free)"

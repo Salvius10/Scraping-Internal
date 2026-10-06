@@ -103,10 +103,11 @@ def refresh_job() -> None:
 # a scheduled one never overlap (and never pay for enrichment twice). Runs in a
 # background thread; the page polls `manual_status()`.
 #
-#   feed  the full refresh: news, funding rounds for Insights, VC firms
-#   vcs   VC firms only: free reads, plus Firecrawl reads that are due
+#   feed    the full refresh: news, funding rounds for Insights, VC firms, events
+#   vcs     VC firms only: free reads, plus Firecrawl reads that are due
+#   events  events organised only: the sources that are due (all paid)
 
-MANUAL_SCOPES = ("feed", "vcs")
+MANUAL_SCOPES = ("feed", "vcs", "events")
 
 
 @dataclass
@@ -134,9 +135,16 @@ def _last_vc_read() -> datetime | None:
         return s.scalar(select(func.max(VcRead.started_at)))
 
 
+def _last_event_read() -> datetime | None:
+    from .models import EventRead
+    with session_scope() as s:
+        return s.scalar(select(func.max(EventRead.started_at)))
+
+
 def _cooldown_left(scope: str, now: datetime) -> timedelta | None:
     """Time left before this scope may be refreshed by hand again, if any."""
-    last = last_refresh() if scope == "feed" else _last_vc_read()
+    last = {"feed": last_refresh, "vcs": _last_vc_read,
+            "events": _last_event_read}[scope]()
     wait = timedelta(minutes=settings.manual_refresh_cooldown_minutes)
     if last is not None and now - last < wait:
         return wait - (now - last)
@@ -152,6 +160,8 @@ def _describe_feed(result) -> str:
         parts.append(f"{rounds} funding {'round' if rounds == 1 else 'rounds'} read")
     if result.vcs is not None:
         parts.append(f"{result.vcs.new} new VC firm posts")
+    if getattr(result, "events", None) is not None:
+        parts.append(f"{result.events.new} new {'event' if result.events.new == 1 else 'events'}")
     text = "Refreshed: " + ", ".join(parts)
     if failed:
         text += f". Could not read {', '.join(failed)}"
@@ -169,12 +179,26 @@ def _describe_vcs(result) -> str:
     return text + "."
 
 
+def _describe_events(result) -> str:
+    if not result.reads:
+        return (f"Events are up to date: every source was read in the last "
+                f"{settings.events_hours}h.")
+    text = (f"Refreshed events: {result.new} new "
+            f"{'event' if result.new == 1 else 'events'} from {len(result.reads)} reads")
+    if result.failed:
+        text += f"; {result.failed} failed"
+    return text + "."
+
+
 def _run_manual(scope: str) -> None:
     summary = error = None
     try:
         if scope == "feed":
             from .ingest.pipeline import refresh
             summary = _describe_feed(refresh())
+        elif scope == "events":
+            from .ingest.events import refresh_events
+            summary = _describe_events(refresh_events())
         else:
             from .ingest.vc_firms import refresh_firms
             summary = _describe_vcs(refresh_firms())
