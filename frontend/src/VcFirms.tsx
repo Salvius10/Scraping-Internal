@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import CopyLink from "./CopyLink";
 import DownloadIcon from "./DownloadIcon";
+import { AddPastedSource, PastedSourceList } from "./PastedSources";
 import RefreshButton from "./RefreshButton";
 import {
   api, parseTime, type VcFirm, type VcKind, type VcOrigin, type VcPost, type VcsResponse,
 } from "./api";
-import { approxFmt, istDay, PRESETS, publishedFmt, showDay } from "./dates";
+import { approxFmt, istDay, PRESETS, publishedFmt, readAgo, showDay } from "./dates";
 import { useRefreshSync } from "./useRefreshSync";
 
 const KIND_TONE: Record<VcKind, string> = {
@@ -18,17 +19,10 @@ const KIND_TONE: Record<VcKind, string> = {
 const ORIGINS: { key: VcOrigin | ""; label: string }[] = [
   { key: "", label: "All sources" },
   { key: "site", label: "Firm website" },
+  { key: "added", label: "Added by you" },
   { key: "search", label: "News search" },
   { key: "news", label: "News feed" },
 ];
-
-function readAgo(iso: string | null): string {
-  if (!iso) return "not read yet";
-  const hours = (Date.now() - parseTime(iso).getTime()) / 3_600_000;
-  if (hours < 1) return "read just now";
-  if (hours < 48) return `read ${Math.round(hours)}h ago`;
-  return `read ${Math.round(hours / 24)} days ago`;
-}
 
 function Published({ post }: { post: VcPost }) {
   if (!post.published_at) return <span className="ins-na">Not given</span>;
@@ -43,8 +37,8 @@ function FirmNote({ firm }: { firm: VcFirm }) {
   return (
     <p className="vc-firm-note">
       <a href={firm.home} target="_blank" rel="noreferrer noopener">{firm.label}</a>
-      {firm.reads.map((r) => (
-        <span key={r.via} className={r.last_error ? "vc-error" : undefined}>
+      {firm.reads.map((r, i) => (
+        <span key={`${r.via}-${i}`} className={r.last_error ? "vc-error" : undefined}>
           {" · "}{r.label[0].toUpperCase() + r.label.slice(1)}, {readAgo(r.last_read)}
           {r.last_error && ` (failed: ${r.last_error})`}
         </span>
@@ -64,6 +58,7 @@ export default function VcFirms() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
 
   const badRange = Boolean(start && end && start > end);
   const query = {
@@ -108,8 +103,9 @@ export default function VcFirms() {
   const firms = data?.firms ?? [];
   const chosen = firms.find((f) => f.key === firm);
   const rows = data?.posts ?? [];
-  const failing = firms.filter((f) => f.reads.some((r) => r.last_error));
-  const withSite = firms.filter((f) => f.reads.some((r) => r.is_site)).length;
+  const tracked = firms.filter((f) => !f.pasted);
+  const failing = tracked.filter((f) => f.reads.some((r) => r.last_error));
+  const withSite = tracked.filter((f) => f.reads.some((r) => r.is_site)).length;
 
   return (
     <section className="ins-main" aria-label="VC firms">
@@ -118,10 +114,19 @@ export default function VcFirms() {
           <h2>VC firm activity</h2>
           <p>
             Who each firm funded or helped, newest first: from each firm&apos;s own website
-            news, plus news searches and funding news in the feed that names it as an investor.
+            news and the websites you add, plus news searches and funding news in the feed that
+            names it as an investor.
           </p>
         </div>
         <div className="ins-actions">
+          <button
+            type="button"
+            className="ins-download ins-download--all"
+            aria-pressed={adding}
+            onClick={() => setAdding(!adding)}
+          >
+            {adding ? "Close" : "Add a website"}
+          </button>
           <RefreshButton
             scope="vcs"
             onDone={() => { if (!badRange) void load(query); }}
@@ -133,6 +138,14 @@ export default function VcFirms() {
           </a>
         </div>
       </header>
+
+      {adding && (
+        <AddPastedSource
+          section="vcs"
+          firms={tracked}
+          onAdded={(message) => { setNote(message); if (!badRange) void load(query); }}
+        />
+      )}
 
       <div className="ins-filter" role="group" aria-label="Filter VC firm news">
         <label className="ins-date vc-select">
@@ -245,6 +258,7 @@ export default function VcFirms() {
                   <td className="ins-time"><Published post={p} /></td>
                   <td className="ins-source">
                     {p.origin === "news" && <span className="ins-web-tag vc-news-tag">News</span>}
+                    {p.origin === "added" && <span className="ins-web-tag">Added</span>}
                     {p.source_label}
                     <CopyLink url={p.url} />
                   </td>
@@ -255,17 +269,28 @@ export default function VcFirms() {
         </div>
       )}
 
-      {firms.length > 0 && (
+      {tracked.length > 0 && (
         <details className="vc-sources">
           <summary>
-            How each firm is read: {withSite} of {firms.length} from their own website
+            How each firm is read: {withSite} of {tracked.length} from their own website
             {failing.length > 0 && `, ${failing.length} with a failed last read`}
           </summary>
           <ul>
-            {firms.map((f) => <li key={f.key}><FirmNote firm={f} /></li>)}
+            {tracked.map((f) => <li key={f.key}><FirmNote firm={f} /></li>)}
           </ul>
         </details>
       )}
+
+      <PastedSourceList
+        section="vcs"
+        sources={data?.sources ?? []}
+        onChanged={(message) => {
+          setNote(message);
+          // The chosen website may be the one removed; changing firm reloads.
+          if (firm.startsWith("pasted-")) setFirm("");
+          else if (!badRange) void load(query);
+        }}
+      />
     </section>
   );
 }

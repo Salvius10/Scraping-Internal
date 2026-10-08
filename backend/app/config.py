@@ -52,6 +52,12 @@ class Settings(BaseSettings):
     vc_firecrawl_hours: int = 24
     vc_items_per_firm: int = 30       # newest posts taken from each read
 
+    # --- Insights: websites pasted on Startup firms / VC firms (ingest/pasted_sources.py) ---
+    # A source with a feed or a plain news page is read free on every refresh;
+    # one that needs Firecrawl (1 credit a read) at most this often.
+    pasted_firecrawl_hours: int = 24
+    pasted_items_per_read: int = 30   # newest posts taken from each read
+
     # --- Insights: Events organised (ingest/events.py) ---
     # Luma calendars are read through an Apify Store actor, billed per event
     # returned in Apify's own account -- separate from the $7 LLM cap, like

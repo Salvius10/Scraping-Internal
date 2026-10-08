@@ -2,7 +2,7 @@
 
 `refresh()` is the full run: fetch every source, then describe (free), enrich
 (paid) and dedupe by company (free), then the Insights steps: funding rounds,
-VC firms and events organised. The CLI and the 12-hour scheduler
+VC firms, websites pasted on those pages, and events organised. The CLI and the 12-hour scheduler
 (`app.scheduler`) both call it, so a manual run and a scheduled one are the
 same code path.
 
@@ -152,6 +152,7 @@ class RefreshResult:
     merged: int | None = None
     rounds: object | None = None       # RoundsResult, or None when skipped
     vcs: object | None = None          # VcResult, or None when it failed
+    pasted: object | None = None       # PastedResult, or None when it failed
     events: object | None = None       # EventsResult, or None when it failed
     chunks_synced: int = 0
 
@@ -195,6 +196,14 @@ def refresh(
         result.vcs = refresh_firms(free_only=skip_paid, classify=enrich)
     except Exception:  # noqa: BLE001
         log.exception("vc firms: refresh failed")
+
+    # Insights: websites pasted on Startup firms and VC firms. Free reads every
+    # time, Firecrawl ones spaced out; their new posts are read by the model.
+    from .pasted_sources import refresh_pasted
+    try:
+        result.pasted = refresh_pasted(free_only=skip_paid, classify=enrich)
+    except Exception:  # noqa: BLE001
+        log.exception("pasted sources: refresh failed")
 
     # Insights > Events organised: the firms' Luma calendars (Apify) and pasted
     # websites (Firecrawl). Every read is paid, each at most every
@@ -296,6 +305,11 @@ def main(argv: list[str] | None = None) -> int:
               % (len(v.reads), v.failed, v.new, v.credits))
         if v.classify is not None:
             print("          %d sorted, $%.6f" % (v.classify.classified, v.classify.cost_usd))
+
+    if result.pasted is not None and result.pasted.reads:
+        ps = result.pasted
+        print("pasted:   %d read (%d failed), %d new posts, %d Firecrawl credits, $%.6f"
+              % (len(ps.reads), ps.failed, ps.new, ps.credits, ps.llm_usd))
 
     if result.events is not None:
         ev = result.events

@@ -160,7 +160,7 @@ export interface FundingRound {
   source_label: string;
   headline: string;
   url: string;
-  origin: "feed" | "web";
+  origin: "feed" | "web" | "pasted";
   date_approx: boolean;
 }
 
@@ -190,6 +190,37 @@ export interface RoundsResponse {
   stages: { key: StageKey; label: string; count: number }[];
   rounds: FundingRound[];
   pending: number;
+  sources: PastedSource[];      // websites pasted on this page
+}
+
+/** A website pasted on Startup firms or VC firms; each page keeps its own. */
+export type PastedSection = "startups" | "vcs";
+
+export interface PastedSource {
+  id: number;
+  key: string;                  // "pasted-3": its firm key on the VC page
+  label: string;
+  url: string;
+  via: "rss" | "html" | "scrape";
+  via_label: string;            // "its feed", "its news page", "its page, via Firecrawl"
+  firm: string | null;          // the tracked firm it belongs to (VC firms only)
+  firm_label: string | null;
+  shown: number;                // rounds in the tabs, or VC posts that are not Other
+  last_read: string | null;
+  last_error: string | null;
+}
+
+export interface AddPastedSourceResponse {
+  added: boolean;
+  source_id: number | null;
+  via: PastedSource["via"] | null;
+  via_label: string | null;
+  found: number;
+  new: number;
+  shown: number;
+  credits_used: number;
+  llm_usd: number;
+  error: string | null;
 }
 
 export type VcKind = "Investment" | "Portfolio news" | "Fund news" | "Other";
@@ -210,7 +241,7 @@ export interface VcPost {
   source_label: string;
 }
 
-export type VcOrigin = "site" | "search" | "news";
+export type VcOrigin = "site" | "added" | "search" | "news";
 
 export interface VcRead {
   via: "rss" | "html" | "sitemap" | "scrape" | "map" | "search";
@@ -227,6 +258,7 @@ export interface VcFirm {
   count: number;
   reads: VcRead[];
   no_site: string | null;
+  pasted: boolean;              // a pasted website shown as a firm of its own
 }
 
 export interface VcsResponse {
@@ -235,6 +267,7 @@ export interface VcsResponse {
   posts: VcPost[];
   pending: number;
   hidden_other: number;
+  sources: PastedSource[];      // websites pasted on this page
 }
 
 export interface VcQuery extends DateRange {
@@ -429,6 +462,13 @@ export const api = {
     }),
   removeEventSource: (id: number) =>
     del<{ removed: boolean }>(`/insights/events/sources/${id}`),
+  // Read straight away: free for a feed or a plain news page, else 1 Firecrawl
+  // credit; then gpt-oss reads the new posts.
+  addSource: (section: PastedSection, url: string, label?: string, firm?: string) =>
+    post<AddPastedSourceResponse>("/insights/sources", {
+      section, url, label: label || undefined, firm: firm || undefined,
+    }),
+  removeSource: (id: number) => del<{ removed: boolean }>(`/insights/sources/${id}`),
   webSearch: (query: string, kind: SearchKind) =>
     post<WebSearchResponse>("/intelligence/search", { query, kind }),
   scrapePage: (url: string, query: string) =>

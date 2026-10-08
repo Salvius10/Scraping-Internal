@@ -5,17 +5,20 @@
   GET /api/insights/vcs.xlsx?firm=...     the same rows as an Excel file
 
 Both take `start` / `end` (YYYY-MM-DD, IST, inclusive) like the funding tabs,
-`origin` (site | search | news) to show one kind of source, and `all=true` to
-include posts sorted as Other (essays, podcasts, events).
+`origin` (site | added | search | news) to show one kind of source, and
+`all=true` to include posts sorted as Other (essays, podcasts, events).
 
-Rows come from three places, merged by date:
+Rows come from four places, merged by date:
   - site:   the firm's own website news, read on the 12h refresh by
             `ingest/vc_firms.py`;
+  - added:  websites pasted on the page (`ingest/pasted_sources.py`), shown
+            under the tracked firm they were tied to, else under their name;
   - search: a news search about the firm, for firms that have one;
   - news:   funding rounds already pulled from the news feed and "Search web"
             that name the firm among the investors. Free: a regex over rows.
 One deal shows once: when the same firm and company appear within
-DUPLICATE_DAYS, the firm's own post wins, then the search result.
+DUPLICATE_DAYS, the firm's own post wins, then a pasted website's, then the
+search result.
 
 Reads only: no fetch, no model.
 """
@@ -32,19 +35,22 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..db import get_session
+from ..ingest.pasted_sources import all_sources, firm_key
 from ..ingest.sources import load_sources
 from ..ingest.vc_firms import (
     READ_LABELS, SITE_VIAS, VIA_LABELS, VcFirm, get_firm, load_firms,
 )
 from ..models import (
-    Article, Category, FundingRound, VcKind, VcPost, VcRead, WebRound, utcnow,
+    Article, Category, FundingRound, PastedSource, VcKind, VcPost, VcRead, WebRound, utcnow,
 )
+from ..search.firecrawl import domain_of
 from .insights import IST, Window
+from .pasted import PastedSourceOut, pasted_sources
 
 router = APIRouter(prefix="/api/insights", tags=["insights"])
 
 DUPLICATE_DAYS = 14
-ORIGINS = ("site", "search", "news")        # also the priority order for one deal
+ORIGINS = ("site", "added", "search", "news")   # also the priority order for one deal
 
 
 class VcPostOut(BaseModel):
@@ -59,7 +65,7 @@ class VcPostOut(BaseModel):
     published_at: datetime | None
     date_approx: bool = False    # a day only, no time
     url: str
-    origin: str                  # "site" | "search" | "news"
+    origin: str                  # "site" | "added" | "search" | "news"
     source_label: str
 
 
@@ -78,6 +84,7 @@ class FirmOut(BaseModel):
     count: int                   # rows shown for the current filters
     reads: list[ReadOut]
     no_site: str | None          # why the firm's own site has no news to read
+    pasted: bool = False         # a pasted website shown as a firm of its own
 
 
 class VcsOut(BaseModel):
@@ -86,6 +93,7 @@ class VcsOut(BaseModel):
     posts: list[VcPostOut]
     pending: int                 # posts read but not yet sorted
     hidden_other: int            # posts sorted as Other, not shown
+    sources: list[PastedSourceOut]   # websites pasted on this page
 
 
 def _in_window(when: datetime | None, window: Window) -> bool:
@@ -97,25 +105,42 @@ def _in_window(when: datetime | None, window: Window) -> bool:
             and (window.until is None or when < window.until))
 
 
-def _site_posts(session: Session, firms: dict[str, VcFirm],
+def _pasted() -> dict[str, PastedSource]:
+    """Websites pasted on this page, by the firm key their posts are stored under."""
+    return {firm_key(src.id): src for src in all_sources("vcs")}
+
+
+def _shown_as(src: PastedSource, firms: dict[str, VcFirm]) -> tuple[str, str]:
+    """(key, label) a pasted website's posts are shown under."""
+    owner = firms.get(src.firm or "")
+    return (owner.key, owner.label) if owner else (firm_key(src.id), src.label)
+
+
+def _site_posts(session: Session, firms: dict[str, VcFirm], pasted: dict[str, PastedSource],
                 include_other: bool) -> tuple[list[VcPostOut], int]:
     rows = session.scalars(
         select(VcPost).where(VcPost.classified_at.is_not(None))).all()
     out, hidden = [], 0
     for p in rows:
-        firm = firms.get(p.firm)
-        if firm is None:
+        if p.firm in pasted:
+            src = pasted[p.firm]
+            key, label = _shown_as(src, firms)
+            origin, source_label = "added", domain_of(src.url)
+        elif p.firm in firms:
+            key, label = p.firm, firms[p.firm].label
+            origin = "site" if p.via in SITE_VIAS else "search"
+            source_label = VIA_LABELS.get(p.via, p.via)
+        else:
             continue            # a firm removed from the registry
         if p.kind == VcKind.OTHER and not include_other:
             hidden += 1
             continue
         out.append(VcPostOut(
-            id=f"site-{p.id}", firm=firm.key, firm_label=firm.label,
+            id=f"site-{p.id}", firm=key, firm_label=label,
             kind=(p.kind or VcKind.OTHER).value, headline=p.headline or p.title,
             company=p.company, round=p.round_label, amount=p.amount,
             published_at=p.published_at, date_approx=p.date_approx, url=p.url,
-            origin="site" if p.via in SITE_VIAS else "search",
-            source_label=VIA_LABELS.get(p.via, p.via),
+            origin=origin, source_label=source_label,
         ))
     return out, hidden
 
@@ -167,7 +192,7 @@ def _same_deal(a: VcPostOut, b: VcPostOut) -> bool:
 def _rows(session: Session, window: Window, include_other: bool,
           origin: str | None = None) -> tuple[list[VcPostOut], int]:
     firms = {f.key: f for f in load_firms()}
-    posts, hidden = _site_posts(session, firms, include_other)
+    posts, hidden = _site_posts(session, firms, _pasted(), include_other)
     kept: list[VcPostOut] = []
     for row in sorted(posts + _news_rounds(session, firms),
                       key=lambda r: ORIGINS.index(r.origin)):
@@ -182,7 +207,13 @@ def _rows(session: Session, window: Window, include_other: bool,
     return rows, hidden
 
 
-def _firms(session: Session, rows: list[VcPostOut]) -> list[FirmOut]:
+def _pasted_read(src: PastedSourceOut) -> ReadOut:
+    return ReadOut(via=src.via, label=f"added by you, from {src.via_label}", is_site=True,
+                   last_read=src.last_read, last_error=src.last_error)
+
+
+def _firms(session: Session, rows: list[VcPostOut],
+           pasted: list[PastedSourceOut]) -> list[FirmOut]:
     counts: dict[str, int] = {}
     for r in rows:
         counts[r.firm] = counts.get(r.firm, 0) + 1
@@ -201,20 +232,35 @@ def _firms(session: Session, rows: list[VcPostOut]) -> list[FirmOut]:
                 last_read=done.started_at if done else None,
                 last_error=done.error if done else None,
             ))
+        reads += [_pasted_read(p) for p in pasted if p.firm == f.key]
         out.append(FirmOut(key=f.key, label=f.label, home=f.home,
                            count=counts.get(f.key, 0), reads=reads, no_site=f.no_site))
+    # A pasted website not tied to a tracked firm is listed as a firm of its own.
+    for p in pasted:
+        if p.firm_label is None:
+            out.append(FirmOut(key=p.key, label=p.label, home=p.url, count=counts.get(p.key, 0),
+                               reads=[_pasted_read(p)], no_site=None, pasted=True))
     return out
 
 
+def _firm_label(firm: str) -> str | None:
+    """A tracked firm's name, or a pasted website's shown as a firm of its own."""
+    found = get_firm(firm)
+    if found:
+        return found.label
+    src = _pasted().get(firm)
+    return src.label if src else None
+
+
 def _check_firm(firm: str | None) -> str | None:
-    if firm and get_firm(firm) is None:
+    if firm and _firm_label(firm) is None:
         raise HTTPException(status_code=404, detail=f"unknown firm {firm!r}")
     return firm or None
 
 
 def _check_origin(origin: str | None) -> str | None:
     if origin and origin not in ORIGINS:
-        raise HTTPException(status_code=400, detail="origin is site, search or news")
+        raise HTTPException(status_code=400, detail="origin is site, added, search or news")
     return origin or None
 
 
@@ -231,10 +277,11 @@ def vcs(
     rows, hidden = _rows(session, Window(start, end), all, _check_origin(origin))
     pending = session.scalar(
         select(func.count(VcPost.id)).where(VcPost.classified_at.is_(None))) or 0
+    sources = pasted_sources(session, "vcs")
     return VcsOut(
-        firm=firm, firms=_firms(session, rows),
+        firm=firm, firms=_firms(session, rows, sources),
         posts=[r for r in rows if not firm or r.firm == firm],
-        pending=pending, hidden_other=hidden,
+        pending=pending, hidden_other=hidden, sources=sources,
     )
 
 
@@ -265,7 +312,7 @@ def vcs_excel(
 
     workbook = Workbook()
     ws = workbook.active
-    ws.title = (get_firm(firm).label if firm else "VC firms")[:31]
+    ws.title = (_firm_label(firm) if firm else "VC firms")[:31]
     ws.append([name for name, _ in COLUMNS])
     for cell in ws[1]:
         cell.font = Font(bold=True, color="FFFFFF")
@@ -276,7 +323,8 @@ def vcs_excel(
     for r in rows:
         published = (r.published_at.astimezone(IST).replace(tzinfo=None)
                      if r.published_at else None)
-        found_via = "News feed: " + r.source_label if r.origin == "news" else r.source_label
+        found_via = {"news": "News feed: ", "added": "Added by you: "}.get(r.origin, "") \
+            + r.source_label
         ws.append([r.firm_label, r.kind, r.company or "", r.round or "",
                    r.amount or "", published, found_via, r.headline, r.url])
         row = ws.max_row

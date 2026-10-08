@@ -46,7 +46,9 @@ CACHE_TTL = 3600
 
 _ALLOWED_PORTS = {80, 443}
 _ALLOWED_TYPES = ("text/html", "application/xhtml+xml", "text/plain",
-                  "application/xml", "text/xml")
+                  "application/xml", "text/xml",
+                  # Feeds, for websites pasted as Insights sources.
+                  "application/rss+xml", "application/atom+xml")
 # Markup that carries no readable content but a great many tokens.
 _DROP_TAGS = ("script", "style", "noscript", "svg", "iframe", "canvas",
               "template", "link", "meta", "object", "embed", "picture source")

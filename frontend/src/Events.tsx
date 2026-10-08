@@ -6,7 +6,7 @@ import {
   api, parseTime, type AddEventSourceResponse, type EventItem, type EventSourceInfo,
   type EventsResponse, type EventWhen,
 } from "./api";
-import { approxFmt, publishedFmt, showDay } from "./dates";
+import { approxFmt, publishedFmt, readAgo, showDay } from "./dates";
 import { useRefreshSync } from "./useRefreshSync";
 
 const timeFmt = new Intl.DateTimeFormat("en-IN", {
@@ -23,14 +23,6 @@ const TABS: { key: EventWhen; label: string }[] = [
 const isLuma = (url: string) =>
   /^(https?:\/\/)?(www\.)?(lu\.ma|luma\.com)(\/|$)/i.test(url.trim())
   && !/^(https?:\/\/)?(www\.)?(lu\.ma|luma\.com)\/calendar\//i.test(url.trim());
-
-function readAgo(iso: string | null): string {
-  if (!iso) return "not read yet";
-  const hours = (Date.now() - parseTime(iso).getTime()) / 3_600_000;
-  if (hours < 1) return "read just now";
-  if (hours < 48) return `read ${Math.round(hours)}h ago`;
-  return `read ${Math.round(hours / 24)} days ago`;
-}
 
 /** Start time in IST; a day only when the source gave no time. */
 function When({ event }: { event: EventItem }) {

@@ -8,6 +8,7 @@ import { useRefreshSync } from "./useRefreshSync";
 import VcFirms from "./VcFirms";
 import Events from "./Events";
 import DownloadIcon from "./DownloadIcon";
+import { AddPastedSource, PastedSourceList } from "./PastedSources";
 import RefreshButton from "./RefreshButton";
 
 // Phosphor Icons (MIT), regular weight: "globe".
@@ -43,6 +44,7 @@ function StartupFirms() {
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [searching, setSearching] = useState(false);
+  const [adding, setAdding] = useState(false);
 
   const badRange = Boolean(start && end && start > end);
   const range: DateRange = { start: start || undefined, end: end || undefined };
@@ -107,9 +109,20 @@ function StartupFirms() {
       <header className="ins-head">
         <div>
           <h2>Startup funding</h2>
-          <p>Companies that raised money, newest first, from the funding news in the feed.</p>
+          <p>
+            Companies that raised money, newest first, from the funding news in the feed and
+            the websites you add.
+          </p>
         </div>
         <div className="ins-actions">
+          <button
+            type="button"
+            className="ins-download ins-download--all"
+            aria-pressed={adding}
+            onClick={() => setAdding(!adding)}
+          >
+            {adding ? "Close" : "Add a website"}
+          </button>
           <RefreshButton
             scope="feed"
             onDone={() => { if (!badRange) void load(stage, range); }}
@@ -125,6 +138,13 @@ function StartupFirms() {
           </a>
         </div>
       </header>
+
+      {adding && (
+        <AddPastedSource
+          section="startups"
+          onAdded={(message) => { setNote(message); void load(stage, range); }}
+        />
+      )}
 
       <div className="ins-filter" role="group" aria-label="Filter by publish date">
         <span className="ins-filter-label">Published</span>
@@ -272,6 +292,7 @@ function StartupFirms() {
                   </td>
                   <td className="ins-source">
                     {r.origin === "web" && <span className="ins-web-tag">Web</span>}
+                    {r.origin === "pasted" && <span className="ins-web-tag">Added</span>}
                     {r.source_label}
                     <CopyLink url={r.url} />
                   </td>
@@ -281,6 +302,12 @@ function StartupFirms() {
           </table>
         </div>
       )}
+
+      <PastedSourceList
+        section="startups"
+        sources={data?.sources ?? []}
+        onChanged={(message) => { setNote(message); void load(stage, range); }}
+      />
     </section>
   );
 }

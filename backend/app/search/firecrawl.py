@@ -123,8 +123,13 @@ def _client() -> httpx.Client:
     return httpx.Client(timeout=settings.firecrawl_timeout + 5)
 
 
+def ready() -> bool:
+    """A key is set, or the URL points at a self-hosted Firecrawl (no key needed)."""
+    return bool(settings.firecrawl_api_key) or "api.firecrawl.dev" not in settings.firecrawl_api_url
+
+
 def _post(path: str, body: dict) -> dict:
-    if not settings.firecrawl_api_key and "api.firecrawl.dev" in settings.firecrawl_api_url:
+    if not ready():
         raise FirecrawlError(
             "Firecrawl is not set up yet. Add FIRECRAWL_API_KEY to .env and "
             "restart the server.")

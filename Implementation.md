@@ -845,6 +845,54 @@ is $0.003 in run starts plus ~$0.002 per upcoming event -- well under $0.50 a
 month, inside Apify's $5 monthly free usage. The one-off past backfill is at
 most 25 events per calendar (~$0.05 each).
 
+#### `api/pasted.py` + `ingest/pasted_sources.py` — Insights: websites you add
+
+Startup firms and VC firms each have an **Add a website** field. A pasted link
+becomes a source for that page only, and what it publishes is shown in that
+page's own format: on Startup firms, the funding rounds in its posts join the
+stage tabs; on VC firms, its posts are sorted like a firm's own news and shown
+under the tracked firm it was tied to (the form's Firm menu), else under its
+own name. Nothing from either reaches the News feed.
+
+The link is untrusted, so every plain fetch -- the page, its feed, each post
+page -- goes through Extract's guarded fetcher (public addresses, ports 80/443,
+3 MB). How a source is read is settled when it is added, cheapest first:
+
+| via | when | cost per read |
+|---|---|---|
+| `rss` | the link is a feed, or its page declares one (the page's own feed wins over the site-wide one a WordPress category page lists first) | free |
+| `html` | post links on the page itself; new posts are opened for their exact date | free |
+| `scrape` | the page refuses plain HTTP, or shows no titled links without a browser | 1 Firecrawl credit |
+
+A link already read is refused: the same link on the same page, a tracked
+firm's own news page (VC firms), or a feed source (Startup firms).
+
+```
+POST   /api/insights/sources {section, url, label?, firm?}   add, then read at once
+DELETE /api/insights/sources/{id}                           remove, with all read from it
+GET    /api/insights/rounds | /api/insights/vcs             each lists its own `sources`
+
+refresh() -> refresh_pasted()   after VC firms, on every 12h refresh
+  free reads every time; a Firecrawl read at most every pasted_firecrawl_hours (24)
+  startups  new posts -> gpt-oss, 20 per call (~$0.00005 each, ledgered as
+            pasted_rounds): the rounds prompt plus "raise": true/false. Kept
+            only if it announces a raise and is not a round already known (same
+            company and stage within 14 days in the feed, Search web or another
+            pasted post). Every post read gets a PastedRound row, kept or not.
+  vcs       new posts -> VcPost under firm "pasted-<id>", via "added", sorted by
+            vc_firms.classify_pending() (25 per call)
+"Refresh now" on VC firms also reads that page's websites.
+```
+
+On VC firms these posts are "Found via: Added by you", a filter of their own,
+and rank after the firm's own post when one deal appears twice. Removing a
+website deletes its rounds or posts and its read history.
+
+Checked live (plain HTTP only, $0) on 2026-10-07: TechCrunch's Venture page
+resolves to `/category/venture/feed/` (20 posts) and Inc42's Buzz page to
+`/buzz/feed/` (24 posts) -- before the own-path rule both took the site-wide
+feed. Antler's blog (Webflow cards with untitled links) falls to Firecrawl.
+
 #### `api/buckets.py` — buckets, kept in step with the scheduler
 
 `GET /api/buckets` returns fixed views of the recent feed, shown as a bar
@@ -1159,9 +1207,10 @@ VC firms, for when the reader does not want to wait for the scheduler.
 
 ```
 POST /api/refresh {"scope": "feed" | "vcs"}     scheduler.start_manual()
-  feed   the full refresh (ingest -> ... -> rounds -> VC firms): News feed,
-         Startup firms
-  vcs    VC firms only: free reads, plus Firecrawl reads that are due
+  feed   the full refresh (ingest -> ... -> rounds -> VC firms -> pasted
+         websites): News feed, Startup firms
+  vcs    VC firms and the websites added on that page: free reads, plus
+         Firecrawl reads that are due
   refused (started: false + reason) when a refresh is already running, or the
   scope was refreshed within manual_refresh_cooldown_minutes (10)
   runs in a background thread holding the scheduler's own lock
@@ -1328,6 +1377,7 @@ Edit `backend/app/ingest/sources.yaml` — nothing else. Run
 | **VCCircle live search is tag-based** | Finds a company only if VCCircle has a tag page for it | Its `/search` page is rendered client-side, so there is nothing to parse without a headless browser |
 | **URL extraction cannot read JavaScript-only pages** | Single-page apps return an empty shell over plain HTTP | Refused for free with a clear message; a headless browser would lift it at the cost of a much larger attack surface |
 | **Live finds lack company/category until the next refresh** | Newly written-through stories show no company and "Other" in the feed for up to 12h | The next scheduled `enrich_pending()` classifies them |
+| **Card-style pages need Firecrawl** | A pasted page whose post links carry no title text (Webflow cards, an image link over a heading) is read through Firecrawl, 1 credit a day | A free sitemap read, as the VC registry uses for Antler, would cover many of them |
 | **Listing-window overflow** | A very busy source could publish more in 12h than its feed holds | Detected and reported by `IngestRun.window_overflowed`, not yet auto-remediated |
 
 ---

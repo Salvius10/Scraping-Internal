@@ -12,7 +12,8 @@ they cannot be placed in it -- and the stage counts follow the range too.
   POST /api/insights/search-web {start, end}  Firecrawl web search for rounds
                                               in the range (ingest/web_rounds)
 
-Rows are the feed's rounds plus any found by "Search web", merged by date.
+Rows are the feed's rounds plus any found by "Search web" and any from
+websites pasted on the page (api/pasted.py), merged by date.
 
 Rows come from `funding_rounds`, which the scheduled refresh fills as new
 Funding stories arrive (`ingest/rounds.py`). Reads only: no fetch, no model.
@@ -35,7 +36,10 @@ from ..db import get_session
 from ..ingest.rounds import tidy_round
 from ..ingest.web_rounds import WebSearchError, search_web
 from ..ingest.sources import load_sources
-from ..models import Article, Category, FundingRound, Stage, WebRound, utcnow
+from ..models import (
+    Article, Category, FundingRound, PastedRound, PastedSource, Stage, WebRound, utcnow,
+)
+from .pasted import PastedSourceOut, pasted_sources
 
 router = APIRouter(prefix="/api/insights", tags=["insights"])
 
@@ -67,7 +71,7 @@ class RoundOut(BaseModel):
     source_label: str
     headline: str
     url: str
-    origin: str = "feed"         # "feed" (our news sites) or "web" (Search web)
+    origin: str = "feed"         # "feed" (our news sites), "web" (Search web), "pasted"
     date_approx: bool = False    # time came from "3 days ago", not a stamp
 
 
@@ -81,7 +85,8 @@ class RoundsOut(BaseModel):
     stage: str
     stages: list[StageCount]
     rounds: list[RoundOut]
-    pending: int                 # Funding stories not yet read for Insights
+    pending: int                 # Funding stories and pasted posts not yet read
+    sources: list[PastedSourceOut]   # websites pasted on this page
 
 
 def _base():
@@ -160,6 +165,20 @@ def _rows(session: Session, stage: Stage, window: Window | None = None) -> list[
             headline=wr.headline, url=wr.url, origin="web", date_approx=wr.date_approx,
         ))
 
+    names = {s.id: s.label for s in session.scalars(select(PastedSource)).all()}
+    pasted = (window or Window()).apply(
+        select(PastedRound).where(PastedRound.stage == stage, PastedRound.kept.is_(True)),
+        PastedRound.published_at)
+    for pr in session.scalars(pasted).all():
+        out.append(RoundOut(
+            id=f"pasted-{pr.id}", company=pr.company, stage=STAGE_TITLES[pr.stage],
+            round=pr.round_label, amount=pr.amount,
+            investors=[n for n in (pr.investors or "").split("; ") if n],
+            published_at=pr.published_at, source="pasted",
+            source_label=names.get(pr.source_id, "Your website"), headline=pr.headline,
+            url=pr.url, origin="pasted", date_approx=pr.date_approx,
+        ))
+
     # One list, newest first; undated rows last.
     out.sort(key=lambda r: (r.published_at is not None,
                             r.published_at.timestamp() if r.published_at else 0),
@@ -182,17 +201,26 @@ def _counts(session: Session, window: Window | None = None) -> list[StageCount]:
             .where(WebRound.kept.is_(True)), WebRound.published_at)
         .group_by(WebRound.stage)
     ).all())
+    pasted = dict(session.execute(
+        (window or Window()).apply(
+            select(PastedRound.stage, func.count(PastedRound.id))
+            .where(PastedRound.kept.is_(True)), PastedRound.published_at)
+        .group_by(PastedRound.stage)
+    ).all())
     return [StageCount(key=key, label=STAGE_TITLES[stage],
-                       count=rows.get(stage, 0) + web.get(stage, 0))
+                       count=rows.get(stage, 0) + web.get(stage, 0) + pasted.get(stage, 0))
             for key, stage in STAGE_KEYS.items()]
 
 
 def _pending(session: Session) -> int:
-    return session.scalar(
+    feed = session.scalar(
         select(func.count(Article.id))
         .where(Article.canonical_id.is_(None), Article.category == Category.FUNDING,
                Article.id.not_in(select(FundingRound.article_id)))
     ) or 0
+    pasted = session.scalar(
+        select(func.count(PastedRound.id)).where(PastedRound.extracted_at.is_(None))) or 0
+    return feed + pasted
 
 
 @router.get("/rounds", response_model=RoundsOut)
@@ -207,10 +235,13 @@ def rounds(
     return RoundsOut(
         stage=stage, stages=_counts(session, window),
         rounds=_rows(session, chosen, window), pending=_pending(session),
+        sources=pasted_sources(session, "startups"),
     )
 
 
 # --- Excel ------------------------------------------------------------------------
+
+FOUND_VIA = {"feed": "News feed", "web": "Web search", "pasted": "Your website"}
 
 COLUMNS = [
     ("Company", 28), ("Stage", 12), ("Round", 16), ("Investors", 44),
@@ -237,7 +268,7 @@ def _sheet(workbook, title: str, rows: list[RoundOut]) -> None:
         ws.append([
             r.company or "", r.stage, r.round or "", ", ".join(r.investors),
             r.amount or "Undisclosed", published, r.source_label,
-            "Web search" if r.origin == "web" else "News feed", r.headline, r.url,
+            FOUND_VIA[r.origin], r.headline, r.url,
         ])
         row = ws.max_row
         ws.cell(row=row, column=6).number_format = (

@@ -103,8 +103,10 @@ def refresh_job() -> None:
 # a scheduled one never overlap (and never pay for enrichment twice). Runs in a
 # background thread; the page polls `manual_status()`.
 #
-#   feed    the full refresh: news, funding rounds for Insights, VC firms, events
-#   vcs     VC firms only: free reads, plus Firecrawl reads that are due
+#   feed    the full refresh: news, funding rounds for Insights, VC firms, pasted
+#           websites, events
+#   vcs     VC firms and websites pasted on that page: free reads, plus
+#           Firecrawl reads that are due
 #   events  events organised only: the sources that are due (all paid)
 
 MANUAL_SCOPES = ("feed", "vcs", "events")
@@ -160,6 +162,9 @@ def _describe_feed(result) -> str:
         parts.append(f"{rounds} funding {'round' if rounds == 1 else 'rounds'} read")
     if result.vcs is not None:
         parts.append(f"{result.vcs.new} new VC firm posts")
+    pasted = getattr(result, "pasted", None)
+    if pasted is not None and pasted.reads:
+        parts.append(f"{pasted.new} new from the websites you added")
     if getattr(result, "events", None) is not None:
         parts.append(f"{result.events.new} new {'event' if result.events.new == 1 else 'events'}")
     text = "Refreshed: " + ", ".join(parts)
@@ -168,9 +173,11 @@ def _describe_feed(result) -> str:
     return text + "."
 
 
-def _describe_vcs(result) -> str:
+def _describe_vcs(result, pasted=None) -> str:
     text = (f"Refreshed VC firms: {result.new} new "
             f"{'post' if result.new == 1 else 'posts'} from {len(result.reads)} reads")
+    if pasted is not None and pasted.reads:
+        text += f", {pasted.new} from the websites you added"
     if result.skipped:
         text += (f"; {result.skipped} Firecrawl reads skipped, as they ran in the "
                  f"last {settings.vc_firecrawl_hours}h")
@@ -200,8 +207,9 @@ def _run_manual(scope: str) -> None:
             from .ingest.events import refresh_events
             summary = _describe_events(refresh_events())
         else:
+            from .ingest.pasted_sources import refresh_pasted
             from .ingest.vc_firms import refresh_firms
-            summary = _describe_vcs(refresh_firms())
+            summary = _describe_vcs(refresh_firms(), refresh_pasted(section="vcs"))
     except Exception as exc:  # noqa: BLE001 - reported on the page, not raised
         log.exception("manual %s refresh failed", scope)
         error = f"The refresh failed: {type(exc).__name__}: {exc}"[:300]

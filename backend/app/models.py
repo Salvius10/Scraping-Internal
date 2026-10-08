@@ -293,7 +293,8 @@ class VcPost(Base):
     published_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), index=True,
                                                           default=None)
     date_approx: Mapped[bool] = mapped_column(default=False)
-    via: Mapped[str] = mapped_column(String(20))       # rss | html | scrape | search
+    # rss | html | sitemap | scrape | map | search, or "added" for a pasted source
+    via: Mapped[str] = mapped_column(String(20))
     found_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
 
     # Filled by the batched gpt-oss pass.
@@ -320,6 +321,79 @@ class VcRead(Base):
     items_new: Mapped[int] = mapped_column(Integer, default=0)
     credits_used: Mapped[int] = mapped_column(Integer, default=0)
     error: Mapped[str | None] = mapped_column(Text, default=None)
+
+
+class PastedSource(Base):
+    """A website the reader pasted on Insights > Startup firms or VC firms.
+
+    Each section keeps its own: a "startups" source yields funding rounds for
+    the stage tabs (`PastedRound`), a "vcs" source yields posts sorted like a
+    firm's own news (`VcPost` rows with firm "pasted-<id>"). `via` is how it is
+    read, cheapest that works when it was added: "rss" (its feed, or one the
+    page links to), "html" (post links on the page, plain HTTP) or "scrape"
+    (Firecrawl). `read_url` is what is fetched -- the feed when one was found.
+    `firm` ties a VC source to a tracked firm, so its posts show under it.
+    """
+
+    __tablename__ = "pasted_sources"
+    __table_args__ = (UniqueConstraint("section", "url", name="uq_pasted_sources_section_url"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    section: Mapped[str] = mapped_column(String(20), index=True)   # startups | vcs
+    url: Mapped[str] = mapped_column(String(1000))
+    read_url: Mapped[str] = mapped_column(String(1000))
+    via: Mapped[str] = mapped_column(String(20))
+    label: Mapped[str] = mapped_column(String(200))
+    firm: Mapped[str | None] = mapped_column(String(60), default=None)
+    added_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
+
+
+class PastedSourceRead(Base):
+    """One read of one pasted source: health on the page, and the spacing of
+    Firecrawl reads, which cost credits."""
+
+    __tablename__ = "pasted_source_reads"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    source_id: Mapped[int] = mapped_column(Integer, index=True)
+    started_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow,
+                                                 index=True)
+    items_seen: Mapped[int] = mapped_column(Integer, default=0)
+    items_new: Mapped[int] = mapped_column(Integer, default=0)
+    credits_used: Mapped[int] = mapped_column(Integer, default=0)
+    error: Mapped[str | None] = mapped_column(Text, default=None)
+
+
+class PastedRound(Base):
+    """A post from a pasted Startup firms source, and the round in it.
+
+    Written when first seen; gpt-oss then reads it once (`extracted_at`). Like
+    `WebRound`, every post read gets a row: `kept` is False for posts that do
+    not announce a raise, or repeat a round already known, so none is paid for
+    twice and only rounds reach the tabs.
+    """
+
+    __tablename__ = "pasted_rounds"
+    __table_args__ = (UniqueConstraint("source_id", "url", name="uq_pasted_rounds_source_url"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    source_id: Mapped[int] = mapped_column(Integer, index=True)
+    url: Mapped[str] = mapped_column(String(1000))
+    headline: Mapped[str] = mapped_column(Text)
+    snippet: Mapped[str | None] = mapped_column(Text, default=None)
+    published_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), index=True,
+                                                          default=None)
+    date_approx: Mapped[bool] = mapped_column(default=False)
+    found_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
+
+    # Filled by the batched gpt-oss pass.
+    extracted_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), default=None)
+    company: Mapped[str | None] = mapped_column(String(200), default=None)
+    stage: Mapped[Stage | None] = mapped_column(Enum(Stage), index=True, default=None)
+    round_label: Mapped[str | None] = mapped_column(String(80), default=None)
+    amount: Mapped[str | None] = mapped_column(String(120), default=None)
+    investors: Mapped[str | None] = mapped_column(Text, default=None)
+    kept: Mapped[bool] = mapped_column(default=False, index=True)
 
 
 class EventSource(Base):

@@ -561,10 +561,12 @@ class _Pending:
     snippet: str | None
 
 
-def _load_pending(limit: int | None) -> list[_Pending]:
+def _load_pending(limit: int | None, firms: list[str] | None = None) -> list[_Pending]:
     stmt = (select(VcPost.id, VcPost.firm, VcPost.title, VcPost.snippet)
             .where(VcPost.classified_at.is_(None))
             .order_by(VcPost.found_at.desc(), VcPost.id))
+    if firms is not None:
+        stmt = stmt.where(VcPost.firm.in_(firms))
     if limit:
         stmt = stmt.limit(limit)
     with session_scope() as s:
@@ -572,7 +574,8 @@ def _load_pending(limit: int | None) -> list[_Pending]:
 
 
 def build_prompt(batch: list[_Pending]) -> str:
-    labels = {f.key: f.label for f in load_firms()}
+    from .pasted_sources import vc_labels   # websites pasted on the VC firms page
+    labels = {f.key: f.label for f in load_firms()} | vc_labels()
     lines = [PROMPT_HEAD]
     for n, p in enumerate(batch, start=1):
         body = f"[{n}] (Firm: {labels.get(p.firm, p.firm)}) {p.title}"
@@ -620,11 +623,12 @@ class ClassifyResult:
     stopped_reason: str | None = None
 
 
-def classify_pending(limit: int | None = None,
-                     batch_size: int = BATCH_SIZE) -> ClassifyResult:
-    """Sort every unread post. Stops cleanly when the budget says so."""
+def classify_pending(limit: int | None = None, batch_size: int = BATCH_SIZE,
+                     firms: list[str] | None = None) -> ClassifyResult:
+    """Sort every unread post, or only those of `firms`. Stops cleanly when
+    the budget says so."""
     result = ClassifyResult()
-    pending = _load_pending(limit)
+    pending = _load_pending(limit, firms)
     result.considered = len(pending)
     for start in range(0, len(pending), batch_size):
         batch = pending[start:start + batch_size]
