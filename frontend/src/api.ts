@@ -346,7 +346,70 @@ export interface AddEventSourceResponse {
   error: string | null;
 }
 
-export type RefreshScope = "feed" | "vcs" | "events";
+/* LinkedIn: profiles and company pages the reader adds, read through Apify. */
+export type LinkedinKind = "Funding" | "News" | "Other";
+export type LinkedinKindKey = "funding" | "news";
+
+export interface LinkedinPost {
+  id: number;
+  source_id: number;
+  account: string;
+  author: string | null;        // who wrote it, when the account reposted it
+  repost: boolean;
+  kind: LinkedinKind;
+  headline: string;
+  snippet: string;              // the post's own words, cut short
+  company: string | null;
+  round: string | null;
+  amount: string | null;
+  investors: string[];
+  posted_at: string | null;
+  url: string;
+}
+
+export interface LinkedinSource {
+  id: number;
+  label: string;
+  url: string;
+  kind: "profile" | "company";
+  kind_label: string;
+  count: number;                // posts shown for the current filters
+  posts: number;                // every post read from it
+  last_read: string | null;
+  last_error: string | null;
+}
+
+export interface LinkedinResponse {
+  source: number | null;
+  kind: LinkedinKindKey | null;
+  counts: Record<"funding" | "news" | "other", number>;
+  posts: LinkedinPost[];
+  sources: LinkedinSource[];
+  pending: number;
+  hidden_other: number;
+  apify_ready: boolean;
+}
+
+export interface LinkedinQuery extends DateRange {
+  source?: number;
+  kind?: LinkedinKindKey;
+  all?: boolean;
+}
+
+export interface AddLinkedinSourceResponse {
+  added: boolean;
+  source_id: number | null;
+  label: string | null;
+  found: number;
+  new: number;
+  funding: number;
+  news: number;
+  apify_usd: number;
+  llm_usd: number;
+  error: string | null;
+}
+
+export type RefreshScope = "feed" | "vcs" | "events" | "linkedin";
 
 export interface RefreshStatus {
   scope: RefreshScope | null;
@@ -469,6 +532,23 @@ export const api = {
       section, url, label: label || undefined, firm: firm || undefined,
     }),
   removeSource: (id: number) => del<{ removed: boolean }>(`/insights/sources/${id}`),
+  linkedin: (query: LinkedinQuery) =>
+    get<LinkedinResponse>("/linkedin", { ...query, all: query.all || undefined }),
+  linkedinExcelUrl: (query: LinkedinQuery) => {
+    const params = new URLSearchParams();
+    if (query.source !== undefined) params.set("source", String(query.source));
+    if (query.kind) params.set("kind", query.kind);
+    if (query.start) params.set("start", query.start);
+    if (query.end) params.set("end", query.end);
+    if (query.all) params.set("all", "true");
+    const q = params.toString();
+    return `/api/linkedin.xlsx${q ? `?${q}` : ""}`;
+  },
+  // Paid: read straight away through Apify (~$0.04 for the newest 20 posts),
+  // then gpt-oss reads the posts.
+  addLinkedinSource: (url: string, label?: string) =>
+    post<AddLinkedinSourceResponse>("/linkedin/sources", { url, label: label || undefined }),
+  removeLinkedinSource: (id: number) => del<{ removed: boolean }>(`/linkedin/sources/${id}`),
   webSearch: (query: string, kind: SearchKind) =>
     post<WebSearchResponse>("/intelligence/search", { query, kind }),
   scrapePage: (url: string, query: string) =>

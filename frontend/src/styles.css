@@ -208,6 +208,7 @@ button {
   padding: 0 var(--s2);
   font-size: 13px;
   font-weight: 500;
+  white-space: nowrap;
   color: var(--on-brand-soft);
   transition: color var(--dur) var(--ease);
 }
@@ -1759,7 +1760,8 @@ button {
 
 /* ── Insights ─────────────────────────────────────────────────────────── */
 
-.shell[data-view="insights"] { grid-template-columns: minmax(0, 1fr); }
+.shell[data-view="insights"],
+.shell[data-view="linkedin"] { grid-template-columns: minmax(0, 1fr); }
 
 .ins {
   display: grid;
@@ -2193,6 +2195,62 @@ button {
 
 .ev-sourceless-note { margin: var(--s2) 0 0; }
 
+/* --- LinkedIn ------------------------------------------------------------ */
+
+/* The account rail reuses the Insights sidebar; a long name is cut, never wrapped. */
+.li-side-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.li-side-error { color: var(--accent-ink); font-weight: 700; }
+.ins-side-item[aria-current="page"] .li-side-error { color: var(--on-brand-warn); }
+
+.li-side-count {
+  flex: none;
+  margin-left: var(--s2);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-soft);
+}
+
+.ins-side-item[aria-current="page"] .li-side-count { color: var(--on-brand-soft); }
+
+.li-side-add {
+  margin-top: var(--s2);
+  padding: 8px var(--s3);
+  border-radius: var(--r-sm);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--brand);
+  text-align: left;
+}
+
+.li-side-add:hover { background: var(--surface); }
+
+.li-kind-count {
+  margin-left: 6px;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.75;
+}
+
+.li-snippet {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  max-width: 560px;
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--ink-mid);
+}
+
+.li-table .vc-firm { max-width: 200px; white-space: normal; }
+
 /* ── Responsive ───────────────────────────────────────────────────────── */
 
 @media (max-width: 1100px) {
@@ -2217,6 +2275,8 @@ button {
   }
   .masthead { margin: 0 calc(var(--s4) * -1) var(--s4); padding: 0 var(--s4); }
   .masthead-left { gap: var(--s3); }
+  /* Four sections do not fit beside the wordmark on a phone: the tabs scroll. */
+  .views { min-width: 0; overflow-x: auto; scrollbar-width: none; }
   .refresh-btn--dark { padding: 0 var(--s2); }
   .refresh-btn--dark .refresh-label { display: none; }
   .wordmark .wordmark-sub { display: none; }
@@ -2249,6 +2309,7 @@ button {
   .ins-side { position: static; flex-direction: row; overflow-x: auto; }
   .ins-side h2 { display: none; }
   .ins-side-item { width: auto; white-space: nowrap; gap: var(--s2); }
+  .li-side-add { margin-top: 0; white-space: nowrap; }
   .ins-head, .ins-tabs, .ins-filter { padding-left: var(--s4); padding-right: var(--s4); }
   .vc-toggle { margin-left: 0; }
   .vc-firm-note, .vc-sources { margin-left: var(--s4); margin-right: var(--s4); }

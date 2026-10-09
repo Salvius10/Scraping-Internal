@@ -893,6 +893,67 @@ resolves to `/category/venture/feed/` (20 posts) and Inc42's Buzz page to
 `/buzz/feed/` (24 posts) -- before the own-path rule both took the site-wide
 feed. Antler's blog (Webflow cards with untitled links) falls to Firecrawl.
 
+#### `api/linkedin.py` + `ingest/linkedin.py` — LinkedIn
+
+A section of its own in the navbar. The reader pastes a LinkedIn profile
+(`linkedin.com/in/...`) or company page (`linkedin.com/company/...`) and clicks
+**Add to sources**: the account is saved, read straight away, then read again
+on every 12h refresh. Its posts are sorted by gpt-oss into **Funding**, **News**
+or **Other**, and shown with the same publish-date timeline as Insights (Last
+7 / 30 / 90 days, All time, From–To). A left rail lists the accounts; picking
+one filters the table to it.
+
+Posts come from the Apify actor `harvestapi~linkedin-profile-posts` ("No
+Cookies"): no LinkedIn login, cookies or personal account are used, only
+`APIFY_API_TOKEN`. We never fetch the pasted link ourselves; it only goes to
+Apify. Pricing, read from the actor's public record on 2026-10-09 (free tier):
+
+| charge | price |
+|---|---|
+| a post returned | $0.002 |
+| a run start (256 MB) | $0.00005 |
+| a read that finds no posts | $0.001 |
+
+Reactions and comments are charged as posts of their own, so they are never
+asked for.
+
+```
+first read   maxPosts = linkedin_first_posts (20)                    ~$0.04
+later reads  postedLimitDate = newest stored post + 1 s, so only new
+             posts are paid for; a quiet account costs $0.001          ~$0.001-0.01
+every run    maxItems and maxTotalChargeUsd set (<= apify_max_charge_usd)
+each account at most every linkedin_hours (24); a failed read does not count
+new posts -> gpt-oss, 20 per call, ~180 tokens each (~$0.00007 a post,
+             ledgered as linkedin_posts): kind, headline, company, and for
+             Funding only round, amount, investors
+refresh() -> refresh_linkedin()    after events; none with --skip-paid
+
+GET    /api/linkedin?source=&kind=funding|news&start=&end=&all=true
+GET    /api/linkedin.xlsx                      same rows as Excel
+POST   /api/linkedin/sources {url, label?}     add, then read at once (paid)
+DELETE /api/linkedin/sources/{id}              remove, with its posts and reads
+POST   /api/refresh {"scope": "linkedin"}      read the accounts that are due
+python -m app.ingest.linkedin --once [--source 3] [--force]
+```
+
+A pasted link is kept in one spelling, `https://www.linkedin.com/{in|company}/<slug>/`
+(slug lower-cased; any sub-page such as `/posts/?feedView=all` is the account
+itself), so the same account cannot be added twice. A single post, a school
+page or a non-LinkedIn host is refused in words, and nothing is saved while
+`APIFY_API_TOKEN` is unset. Until the first read, an unnamed account is shown
+by its slug; the read replaces it with the account's own name. A post whose
+author is not the account is a repost and says whose it was. Post links must
+be http(s) before they reach an href.
+
+Tables: `linkedin_sources`, `linkedin_posts` (unique per account and LinkedIn
+post id, so a re-read never stores or pays the model for a post twice) and
+`linkedin_reads` (health on the page, the 24h spacing, the Apify estimate).
+
+Not yet run live: how the actor marks a repost, and what it returns for a
+private or missing account, are not documented, so both are handled
+defensively (an author other than the account; any `error`/`message` row).
+Check them on the first real read.
+
 #### `api/buckets.py` — buckets, kept in step with the scheduler
 
 `GET /api/buckets` returns fixed views of the recent feed, shown as a bar
@@ -1202,15 +1263,20 @@ every 12h → refresh_job():
 
 ### 6.4a Manual refresh ("Refresh now")
 
-A button on the News feed masthead, Insights > Startup firms and Insights >
-VC firms, for when the reader does not want to wait for the scheduler.
+A button on the News feed masthead, Insights > Startup firms, VC firms and
+Events organised, and LinkedIn, for when the reader does not want to wait for
+the scheduler.
 
 ```
-POST /api/refresh {"scope": "feed" | "vcs"}     scheduler.start_manual()
+POST /api/refresh {"scope": "feed" | "vcs" | "events" | "linkedin"}
+                                                scheduler.start_manual()
   feed   the full refresh (ingest -> ... -> rounds -> VC firms -> pasted
-         websites): News feed, Startup firms
+         websites -> events -> LinkedIn): News feed, Startup firms
   vcs    VC firms and the websites added on that page: free reads, plus
          Firecrawl reads that are due
+  events the event sources that are due
+  linkedin  the LinkedIn accounts that are due (Apify), then their new posts
+         are read by the model
   refused (started: false + reason) when a refresh is already running, or the
   scope was refreshed within manual_refresh_cooldown_minutes (10)
   runs in a background thread holding the scheduler's own lock
@@ -1290,7 +1356,7 @@ are recorded under `intelligence_summary`; Firecrawl credits are billed by Firec
 
 ## 8. Testing
 
-**250 tests, all offline — no test spends money.**
+**378 tests, all offline — no test spends money.**
 
 | File | Tests | Covers |
 |---|---|---|
@@ -1303,6 +1369,7 @@ are recorded under `intelligence_summary`; Firecrawl credits are billed by Firec
 | `test_scheduler.py` | 10 | Restart does not re-run a fresh feed, runs never overlap, a failing run is survived |
 | `test_extract.py` | 32 | URL guard (private IPs, metadata endpoint, schemes, ports, redirect-to-localhost), size/type limits, HTML cleaning, result shapes, budget checked before any call, cache, one run at a time |
 | `test_storage.py` | 6 | Timestamps come back aware, API emits an offset, activity uses the reader's day, chunk sync |
+| `test_linkedin.py` | 27 | Pasted links kept as one canonical account, others refused in words, nothing saved without Apify; the actor asked only for posts (no reactions or comments) with both caps, later reads only for newer posts; a post stored once, non-post rows never stored, an empty first read an error; the label becomes the account's name; Funding details on Funding only, skipped posts stay pending, budget stops cleanly; 24h spacing, `--skip-paid` reads nothing; API filters, Excel, add/remove, the `linkedin` refresh scope |
 | `test_events.py` | 36 | Apify called with both caps and readable errors, Luma rows mapped (diagnostics never stored, global calendars kept to India), a page read by the model once per change, untrusted model output, rescheduled events updated not duplicated, past backfilled once, upcoming/past split, organiser filter, Excel, add/remove pasted sources, the `events` refresh scope |
 
 Two deliberate choices:

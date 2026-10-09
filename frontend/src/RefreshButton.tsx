@@ -27,6 +27,12 @@ const SCOPE_TEXT: Record<RefreshScope, { idle: string; busy: string; title: stri
     title: "Read the event sources that are due now. Each is read at most once a day "
       + "(Apify for Luma calendars, Firecrawl for websites), so recent ones are skipped.",
   },
+  linkedin: {
+    idle: "Refresh now",
+    busy: "Refreshing",
+    title: "Read the LinkedIn accounts that are due now, through Apify. Each is read at "
+      + "most once a day and only its new posts are paid for, so recent ones are skipped.",
+  },
 };
 
 function elapsed(since: string | null): string {

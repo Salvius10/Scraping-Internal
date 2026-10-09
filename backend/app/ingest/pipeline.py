@@ -2,7 +2,8 @@
 
 `refresh()` is the full run: fetch every source, then describe (free), enrich
 (paid) and dedupe by company (free), then the Insights steps: funding rounds,
-VC firms, websites pasted on those pages, and events organised. The CLI and the 12-hour scheduler
+VC firms, websites pasted on those pages, and events organised; then the
+LinkedIn accounts added on that page. The CLI and the 12-hour scheduler
 (`app.scheduler`) both call it, so a manual run and a scheduled one are the
 same code path.
 
@@ -154,6 +155,7 @@ class RefreshResult:
     vcs: object | None = None          # VcResult, or None when it failed
     pasted: object | None = None       # PastedResult, or None when it failed
     events: object | None = None       # EventsResult, or None when it failed
+    linkedin: object | None = None     # LinkedinResult, or None when it failed
     chunks_synced: int = 0
 
     @property
@@ -213,6 +215,15 @@ def refresh(
         result.events = refresh_events(free_only=skip_paid)
     except Exception:  # noqa: BLE001
         log.exception("events: refresh failed")
+
+    # LinkedIn: the profiles and company pages added on that page, through
+    # Apify. Every read is paid, each account at most every `linkedin_hours`,
+    # so --skip-paid reads none. Never costs the feed its refresh.
+    from .linkedin import refresh_linkedin
+    try:
+        result.linkedin = refresh_linkedin(free_only=skip_paid, classify=enrich)
+    except Exception:  # noqa: BLE001
+        log.exception("linkedin: refresh failed")
 
     # Belt and braces: citations must quote what is stored. Free.
     from .chunks import sync_all_chunks
@@ -316,6 +327,11 @@ def main(argv: list[str] | None = None) -> int:
         print("events:   %d read (%d failed), %d new events, ~$%.4f Apify, "
               "%d Firecrawl credits, $%.6f LLM"
               % (len(ev.reads), ev.failed, ev.new, ev.apify_usd, ev.credits, ev.llm_usd))
+
+    if result.linkedin is not None and result.linkedin.reads:
+        li = result.linkedin
+        print("linkedin: %d read (%d failed), %d new posts, ~$%.4f Apify, $%.6f LLM"
+              % (len(li.reads), li.failed, li.new, li.apify_usd, li.llm_usd))
 
     if result.chunks_synced:
         print("chunks:   %d citation passages brought up to date (free)"

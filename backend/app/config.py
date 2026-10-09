@@ -80,9 +80,26 @@ class Settings(BaseSettings):
     events_upcoming_items: int = 25   # upcoming events taken per Luma read
     events_past_items: int = 25       # past events, read once per calendar
 
+    # --- LinkedIn (ingest/linkedin.py) ---
+    # Profiles and company pages the reader adds are read through an Apify
+    # Store actor, billed per post returned in Apify's own account -- separate
+    # from the $7 LLM cap. Uses the same APIFY_API_TOKEN as Events.
+    apify_linkedin_actor: str = "harvestapi~linkedin-profile-posts"
+    # Measured on the actor's pricing, 2026-10 (free tier): $0.002 per post, a
+    # run start $0.00005, and $0.001 for a read that finds no posts.
+    linkedin_price_per_post: float = 0.002
+    linkedin_price_per_run: float = 0.00005
+    linkedin_price_per_empty: float = 0.001
+    # Each account is read at most this often; a failed read does not count.
+    linkedin_hours: int = 24
+    # The first read takes this many of the newest posts; later reads take
+    # only posts newer than the newest one already stored, up to the second.
+    linkedin_first_posts: int = 20
+    linkedin_posts_per_read: int = 20
+
     # --- HTTP ---
     user_agent: str = (
-        "IndiaStartupNewsBot/0.1 (+aggregator; contact: melvinsalvius@gmail.com)"
+        "IndiaStartupNewsBot/0.1 (+aggregator; contact: melvinsalvius.26csb@licet.ac.in)"
     )
     http_timeout: float = 20.0
     per_domain_delay: float = 2.0     # be a polite guest

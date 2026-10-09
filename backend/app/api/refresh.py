@@ -1,11 +1,13 @@
-"""Manual refresh: the "Refresh now" buttons on the feed and Insights pages.
+"""Manual refresh: the "Refresh now" buttons on the feed, Insights and LinkedIn pages.
 
-  POST /api/refresh {"scope": "feed" | "vcs" | "events"}   start one in the background
-  GET  /api/refresh                                       is one running, and how it went
+  POST /api/refresh {"scope": "feed" | "vcs" | "events" | "linkedin"}
+                                        start one in the background
+  GET  /api/refresh                     is one running, and how it went
 
 "feed" is the full refresh the scheduler runs (news, funding rounds, VC
-firms, pasted websites, events); "vcs" reads the VC firms and the websites
-pasted on that page, "events" the event sources that are due. All share the scheduler's lock, so a
+firms, pasted websites, events, LinkedIn); "vcs" reads the VC firms and the
+websites pasted on that page, "events" the event sources that are due,
+"linkedin" the LinkedIn accounts that are due. All share the scheduler's lock, so a
 manual run never overlaps a scheduled one, and a scope refreshed within
 `manual_refresh_cooldown_minutes` is not refreshed again. A refused start is
 an ordinary answer (`started: false` with the reason), not an error.

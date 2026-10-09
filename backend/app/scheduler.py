@@ -108,8 +108,10 @@ def refresh_job() -> None:
 #   vcs     VC firms and websites pasted on that page: free reads, plus
 #           Firecrawl reads that are due
 #   events  events organised only: the sources that are due (all paid)
+#   linkedin  the LinkedIn accounts that are due (all paid, Apify), then the
+#           model reads their new posts
 
-MANUAL_SCOPES = ("feed", "vcs", "events")
+MANUAL_SCOPES = ("feed", "vcs", "events", "linkedin")
 
 
 @dataclass
@@ -143,10 +145,16 @@ def _last_event_read() -> datetime | None:
         return s.scalar(select(func.max(EventRead.started_at)))
 
 
+def _last_linkedin_read() -> datetime | None:
+    from .models import LinkedinRead
+    with session_scope() as s:
+        return s.scalar(select(func.max(LinkedinRead.started_at)))
+
+
 def _cooldown_left(scope: str, now: datetime) -> timedelta | None:
     """Time left before this scope may be refreshed by hand again, if any."""
     last = {"feed": last_refresh, "vcs": _last_vc_read,
-            "events": _last_event_read}[scope]()
+            "events": _last_event_read, "linkedin": _last_linkedin_read}[scope]()
     wait = timedelta(minutes=settings.manual_refresh_cooldown_minutes)
     if last is not None and now - last < wait:
         return wait - (now - last)
@@ -167,6 +175,9 @@ def _describe_feed(result) -> str:
         parts.append(f"{pasted.new} new from the websites you added")
     if getattr(result, "events", None) is not None:
         parts.append(f"{result.events.new} new {'event' if result.events.new == 1 else 'events'}")
+    linkedin = getattr(result, "linkedin", None)
+    if linkedin is not None and linkedin.reads:
+        parts.append(f"{linkedin.new} new LinkedIn {'post' if linkedin.new == 1 else 'posts'}")
     text = "Refreshed: " + ", ".join(parts)
     if failed:
         text += f". Could not read {', '.join(failed)}"
@@ -197,6 +208,22 @@ def _describe_events(result) -> str:
     return text + "."
 
 
+def _describe_linkedin(result) -> str:
+    read = result.classify.classified if result.classify else 0
+    if not result.reads:
+        text = (f"LinkedIn is up to date: every account was read in the last "
+                f"{settings.linkedin_hours}h")
+        return text + (f"; {read} waiting posts read." if read else ".")
+    text = (f"Refreshed LinkedIn: {result.new} new "
+            f"{'post' if result.new == 1 else 'posts'} from {len(result.reads)} "
+            f"{'account' if len(result.reads) == 1 else 'accounts'}")
+    if result.skipped:
+        text += f"; {result.skipped} read in the last {settings.linkedin_hours}h, skipped"
+    if result.failed:
+        text += f"; {result.failed} failed"
+    return text + "."
+
+
 def _run_manual(scope: str) -> None:
     summary = error = None
     try:
@@ -206,6 +233,9 @@ def _run_manual(scope: str) -> None:
         elif scope == "events":
             from .ingest.events import refresh_events
             summary = _describe_events(refresh_events())
+        elif scope == "linkedin":
+            from .ingest.linkedin import refresh_linkedin
+            summary = _describe_linkedin(refresh_linkedin())
         else:
             from .ingest.pasted_sources import refresh_pasted
             from .ingest.vc_firms import refresh_firms

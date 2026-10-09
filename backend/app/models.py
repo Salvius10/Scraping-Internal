@@ -471,6 +471,83 @@ class EventRead(Base):
     error: Mapped[str | None] = mapped_column(Text, default=None)
 
 
+class LinkedinKind(str, enum.Enum):
+    """What a LinkedIn post is about. Only OTHER is hidden by default."""
+
+    FUNDING = "Funding"    # a company raised money, or the account invested in a round
+    NEWS = "News"          # a launch, partnership, acquisition, hire, fund, milestone
+    OTHER = "Other"        # opinion, hiring ads, events, greetings, anything else
+
+
+class LinkedinSource(Base):
+    """A LinkedIn profile or company page the reader added on the LinkedIn page.
+
+    `url` is the page in one canonical spelling,
+    https://www.linkedin.com/{in|company}/<slug>/, so the same account cannot
+    be added twice. `label_auto` is set while the label is only the slug from
+    the link; the first read replaces it with the account's own name.
+    """
+
+    __tablename__ = "linkedin_sources"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    url: Mapped[str] = mapped_column(String(300), unique=True)
+    kind: Mapped[str] = mapped_column(String(20))                  # profile | company
+    label: Mapped[str] = mapped_column(String(200))
+    label_auto: Mapped[bool] = mapped_column(default=False)
+    added_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
+
+
+class LinkedinPost(Base):
+    """One post read from a LinkedIn account, through Apify.
+
+    Written when first seen; gpt-oss then reads it once (`classified_at`), so
+    no post is paid for twice. `post_id` is LinkedIn's own activity id, unique
+    within an account; `author` differs from the account for a repost.
+    """
+
+    __tablename__ = "linkedin_posts"
+    __table_args__ = (UniqueConstraint("source_id", "post_id",
+                                       name="uq_linkedin_posts_source_post"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    source_id: Mapped[int] = mapped_column(Integer, index=True)
+    post_id: Mapped[str] = mapped_column(String(80))
+    url: Mapped[str] = mapped_column(String(1000))
+    content: Mapped[str] = mapped_column(Text)
+    author: Mapped[str | None] = mapped_column(String(200), default=None)
+    repost: Mapped[bool] = mapped_column(default=False)
+    posted_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), index=True,
+                                                       default=None)
+    found_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
+
+    # Filled by the batched gpt-oss pass.
+    classified_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), default=None)
+    kind: Mapped[LinkedinKind | None] = mapped_column(Enum(LinkedinKind), index=True,
+                                                      default=None)
+    headline: Mapped[str | None] = mapped_column(Text, default=None)
+    company: Mapped[str | None] = mapped_column(String(200), default=None)
+    round_label: Mapped[str | None] = mapped_column(String(80), default=None)
+    amount: Mapped[str | None] = mapped_column(String(120), default=None)
+    investors: Mapped[str | None] = mapped_column(Text, default=None)
+
+
+class LinkedinRead(Base):
+    """One read of one LinkedIn account: health on the page, the spacing of
+    reads (each is paid in Apify), and what each one cost."""
+
+    __tablename__ = "linkedin_reads"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    source_id: Mapped[int] = mapped_column(Integer, index=True)
+    started_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow,
+                                                 index=True)
+    items_seen: Mapped[int] = mapped_column(Integer, default=0)
+    items_new: Mapped[int] = mapped_column(Integer, default=0)
+    apify_usd: Mapped[float] = mapped_column(Float, default=0.0)   # estimated
+    error: Mapped[str | None] = mapped_column(Text, default=None)
+
+
 class FilterCache(Base):
     """Natural-language filter phrase -> compiled JSON filter.
 

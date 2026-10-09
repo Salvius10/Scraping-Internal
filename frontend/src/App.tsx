@@ -3,6 +3,7 @@ import CopyLink from "./CopyLink";
 import ExtractPanel from "./ExtractPanel";
 import Insights from "./Insights";
 import Intelligence from "./Intelligence";
+import LinkedIn from "./LinkedIn";
 import RefreshButton from "./RefreshButton";
 import Sidebar from "./Sidebar";
 import {
@@ -54,11 +55,12 @@ function describeAge(hours: number | null, interval: number): string {
   return `Refreshed ${days} day${days > 1 ? "s" : ""} ago (expected every ${interval}h)`;
 }
 
-type View = "feed" | "intelligence" | "insights";
+type View = "feed" | "intelligence" | "insights" | "linkedin";
 
 function viewFromHash(): View {
   if (window.location.hash === "#intelligence") return "intelligence";
   if (window.location.hash === "#insights") return "insights";
+  if (window.location.hash === "#linkedin") return "linkedin";
   return "feed";
 }
 
@@ -106,6 +108,12 @@ function Masthead({
             onClick={() => onView("insights")}
           >
             Insights
+          </button>
+          <button
+            aria-current={view === "linkedin" ? "page" : undefined}
+            onClick={() => onView("linkedin")}
+          >
+            LinkedIn
           </button>
         </nav>
       </div>
@@ -557,6 +565,25 @@ export default function App() {
           onRefreshMessage={setUpdateNote}
         />
         <Insights />
+      </div>
+    );
+  }
+
+  if (view === "linkedin") {
+    return (
+      <div className="shell" data-view="linkedin">
+        <a className="skip-link" href="#main">Skip to content</a>
+        <Masthead
+          status={status}
+          activity={activity}
+          activeDay={activeDay}
+          onPickDay={setActiveDay}
+          view={view}
+          onView={showView}
+          onRefreshed={reloadAll}
+          onRefreshMessage={setUpdateNote}
+        />
+        <LinkedIn />
       </div>
     );
   }
