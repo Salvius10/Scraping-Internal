@@ -929,7 +929,8 @@ new posts -> gpt-oss, 20 per call, ~180 tokens each (~$0.00007 a post,
 refresh() -> refresh_linkedin()    after events; none with --skip-paid
 
 GET    /api/linkedin?source=&kind=funding|news&start=&end=&all=true
-GET    /api/linkedin.xlsx                      same rows as Excel
+GET    /api/linkedin.xlsx?source=&start=&end=  Funding posts only, as Excel in the
+                                               Startup firms layout (see below)
 POST   /api/linkedin/sources {url, label?}     add, then read at once (paid)
 DELETE /api/linkedin/sources/{id}              remove, with its posts and reads
 POST   /api/refresh {"scope": "linkedin"}      read the accounts that are due
@@ -944,6 +945,15 @@ page or a non-LinkedIn host is refused in words, and nothing is saved while
 by its slug; the read replaces it with the account's own name. A post whose
 author is not the account is a repost and says whose it was. Post links must
 be http(s) before they reach an href.
+
+**Excel** holds Funding posts only -- News and Other are left out whatever
+the page shows -- written by Startup firms' own `rounds_sheet()`: the same
+columns (Company, Stage, Round, Investors, Amount, Published, Source, Found
+via, Headline, Link) and one sheet per stage. Stage comes from the round the
+model read, by the tabs' rule (`coerce_stage`: Pre-Series A is Seed, no round
+is Other rounds), so the file makes no model call. Source is the account
+("repost of X" when it was), Found via is "LinkedIn". It follows the account
+and dates chosen on the page.
 
 Tables: `linkedin_sources`, `linkedin_posts` (unique per account and LinkedIn
 post id, so a re-read never stores or pays the model for a post twice) and

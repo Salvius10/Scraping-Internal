@@ -9,8 +9,9 @@ an empty first read is an error; the label becomes the account's own name;
 the model reads each post once, Funding details are kept only on Funding, and
 a post it skipped stays pending; an account is read at most every
 `linkedin_hours` and never with --skip-paid; the API filters by account, kind
-and dates, hides Other unless asked, exports the same rows to Excel, adds and
-removes accounts; "Refresh now" has a linkedin scope.
+and dates, hides Other unless asked, exports only Funding posts to Excel in
+the Startup firms layout (one sheet per stage), adds and removes accounts;
+"Refresh now" has a linkedin scope.
 """
 
 from __future__ import annotations
@@ -359,18 +360,43 @@ def test_api_lists_funding_and_news_with_filters(token, monkeypatch) -> None:
                                                 "end": "2026-10-01"}).status_code == 400
 
 
-def test_api_excel_has_the_same_rows(token, monkeypatch) -> None:
+def test_api_excel_is_funding_only_in_the_startup_firms_layout(token, monkeypatch) -> None:
     from openpyxl import load_workbook
 
-    seed(monkeypatch)
-    resp = TestClient(app).get("/api/linkedin.xlsx", params={"kind": "funding"})
+    from app.api.insights import COLUMNS, STAGE_TITLES
+
+    source = seed(monkeypatch)
+    client = TestClient(app)
+    resp = client.get("/api/linkedin.xlsx")
     assert resp.status_code == 200
-    assert "gps-linkedin-funding" in resp.headers["content-disposition"]
-    ws = load_workbook(io.BytesIO(resp.content)).active
-    rows = list(ws.iter_rows(values_only=True))
-    assert rows[0][:3] == ("Account", "What", "Company")
-    assert len(rows) == 2 and rows[1][1] == "Funding" and rows[1][2] == "Orbo"
-    assert ws.cell(row=2, column=10).hyperlink.target.startswith("https://www.linkedin.com/posts/")
+    assert "gps-linkedin-funding-all-accounts-all-dates" in resp.headers["content-disposition"]
+    book = load_workbook(io.BytesIO(resp.content))
+    # One sheet per stage, each with Startup firms' header.
+    assert book.sheetnames == list(STAGE_TITLES.values())
+    for ws in book.worksheets:
+        assert next(ws.iter_rows(values_only=True)) == tuple(name for name, _ in COLUMNS)
+
+    # Only the Funding post, under the stage of its round; News and Other left out.
+    rows = {ws.title: list(ws.iter_rows(min_row=2, values_only=True)) for ws in book.worksheets}
+    assert {title: len(r) for title, r in rows.items() if r} == {"Seed": 1}
+    company, stage, round_, investors, amount, posted, src, via, headline, url = rows["Seed"][0]
+    assert (company, stage, round_, amount) == ("Orbo", "Seed", "Seed", "$2M")
+    assert investors == "Acme Ventures, Blume Ventures"
+    assert (src, via, headline) == ("Acme Ventures", "LinkedIn", "Acme leads Orbo's $2M seed round")
+    assert posted == datetime(2026, 10, 8, 11, 30)       # 06:00 UTC as IST
+    assert book["Seed"].cell(row=2, column=10).hyperlink.target == url
+
+    # The page's kind and "show other" filters do not change the file.
+    filtered = load_workbook(io.BytesIO(
+        client.get("/api/linkedin.xlsx", params={"kind": "news", "all": "true"}).content))
+    assert {ws.title: list(ws.iter_rows(min_row=2, values_only=True))
+            for ws in filtered.worksheets} == rows
+    one = client.get("/api/linkedin.xlsx", params={"source": source.id, "start": "2026-10-09"})
+    assert "gps-linkedin-funding-acme-ventures-2026-10-09-to-today" in \
+        one.headers["content-disposition"]
+    late = load_workbook(io.BytesIO(one.content))
+    assert all(ws.max_row == 1 for ws in late.worksheets)
+    assert client.get("/api/linkedin.xlsx", params={"source": 999}).status_code == 404
 
 
 def test_api_adds_reads_and_removes_an_account(token, monkeypatch) -> None:

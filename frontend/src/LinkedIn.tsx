@@ -269,9 +269,14 @@ export default function LinkedIn() {
               </button>
             )}
             <RefreshButton scope="linkedin" onDone={reload} onMessage={setNote} />
-            <a className="ins-download" href={api.linkedinExcelUrl(query)} download>
+            <a
+              className="ins-download"
+              href={api.linkedinExcelUrl(query)}
+              download
+              title="Funding posts only: company, stage, round, investors and amount, one sheet per stage, as in the Startup firms export"
+            >
               <DownloadIcon />
-              Excel: {chosen?.label ?? "all accounts"}
+              Excel: funding{chosen ? ` · ${chosen.label}` : ""}
             </a>
           </div>
         </header>

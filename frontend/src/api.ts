@@ -534,13 +534,13 @@ export const api = {
   removeSource: (id: number) => del<{ removed: boolean }>(`/insights/sources/${id}`),
   linkedin: (query: LinkedinQuery) =>
     get<LinkedinResponse>("/linkedin", { ...query, all: query.all || undefined }),
+  // Funding posts only, laid out like the Startup firms export: kind and
+  // "show other" do not apply.
   linkedinExcelUrl: (query: LinkedinQuery) => {
     const params = new URLSearchParams();
     if (query.source !== undefined) params.set("source", String(query.source));
-    if (query.kind) params.set("kind", query.kind);
     if (query.start) params.set("start", query.start);
     if (query.end) params.set("end", query.end);
-    if (query.all) params.set("all", "true");
     const q = params.toString();
     return `/api/linkedin.xlsx${q ? `?${q}` : ""}`;
   },

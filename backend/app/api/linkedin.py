@@ -2,14 +2,16 @@
 
   GET    /api/linkedin?source=3&kind=funding    posts newest first, every account
                                                 with its count and last read
-  GET    /api/linkedin.xlsx?...                 the same rows as an Excel file
+  GET    /api/linkedin.xlsx?source=&start=&end= the Funding posts as an Excel file,
+                                                laid out like Startup firms' export
   POST   /api/linkedin/sources {url, label?}    add a profile or company page,
                                                 then read it now
   DELETE /api/linkedin/sources/{id}             remove it, with what was read
 
 The GETs take `start` / `end` (YYYY-MM-DD, IST, inclusive) on the post time,
-like the Insights pages, `kind` (funding | news) to show one kind, and
-`all=true` to include posts read as Other. They read only: no fetch, no model.
+like the Insights pages. The list also takes `kind` (funding | news) to show
+one kind, and `all=true` to include posts read as Other; the Excel file is
+always Funding only. They read only: no fetch, no model.
 
 Adding reads the account straight away through Apify (~$0.04 for the newest
 20 posts), then gpt-oss reads them (~$0.00007 a post). See ingest/linkedin.py.
@@ -18,6 +20,7 @@ Adding reads the account straight away through Apify (~$0.04 for the newest
 from __future__ import annotations
 
 import io
+import re
 from datetime import date, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -30,8 +33,9 @@ from ..db import get_session, session_scope
 from ..ingest.linkedin import (
     KIND_LABELS, SourceError, add_source, all_sources, read_now, ready, remove_source,
 )
-from ..models import LinkedinKind, LinkedinPost, LinkedinRead, utcnow
-from .insights import IST, Window
+from ..ingest.rounds import coerce_stage
+from ..models import LinkedinKind, LinkedinPost, LinkedinRead, Stage, utcnow
+from .insights import IST, STAGE_TITLES, RoundOut, Window, rounds_sheet
 
 router = APIRouter(prefix="/api/linkedin", tags=["linkedin"])
 
@@ -243,59 +247,52 @@ def delete_linkedin_source(source_id: int) -> dict:
 
 
 # --- Excel ------------------------------------------------------------------------
+#
+# Funding posts only, in the Startup firms layout: the same columns, one sheet
+# per stage, written by the same code (`rounds_sheet`). News and Other posts
+# are left out. The stage comes from the round the model read, by the rule the
+# Startup firms tabs use, so the file costs nothing to build.
 
-COLUMNS = [
-    ("Account", 24), ("What", 10), ("Company", 26), ("Round", 16), ("Investors", 36),
-    ("Amount", 18), ("Posted (IST)", 18), ("Headline", 50), ("Post", 70), ("Link", 50),
-]
+def funding_by_stage(session: Session, window: Window,
+                     source: int | None) -> dict[Stage, list[RoundOut]]:
+    """Funding posts as rounds, newest first, under their stage."""
+    by_stage: dict[Stage, list[RoundOut]] = {stage: [] for stage in STAGE_TITLES}
+    rows, _, _ = _rows(session, window, source, LinkedinKind.FUNDING, False)
+    for p in rows:
+        stage = coerce_stage(None, p.round)
+        account = f"{p.account} (repost of {p.author})" if p.repost and p.author else p.account
+        by_stage[stage].append(RoundOut(
+            id=f"linkedin-{p.id}", company=p.company, stage=STAGE_TITLES[stage],
+            round=p.round, amount=p.amount, investors=p.investors,
+            published_at=p.posted_at, source="linkedin", source_label=account,
+            headline=p.headline, url=p.url, origin="linkedin",
+        ))
+    return by_stage
 
 
 @router.get(".xlsx")
 def linkedin_excel(
-    source: int | None = Query(None),
-    kind: str | None = Query(None),
+    source: int | None = Query(None, description="one account's id, or omit for all"),
     start: date | None = Query(None),
     end: date | None = Query(None),
-    all: bool = Query(False),
     session: Session = Depends(get_session),
 ) -> StreamingResponse:
     from openpyxl import Workbook
-    from openpyxl.styles import Alignment, Font, PatternFill
 
     source = _check_source(source)
     window = Window(start, end)
-    rows, _, _ = _rows(session, window, source, _kind(kind), all)
-
     workbook = Workbook()
-    ws = workbook.active
-    ws.title = (_labels()[source] if source is not None else "LinkedIn")[:31]
-    ws.append([name for name, _ in COLUMNS])
-    for cell in ws[1]:
-        cell.font = Font(bold=True, color="FFFFFF")
-        cell.fill = PatternFill("solid", fgColor="1A00D9")
-        cell.alignment = Alignment(vertical="center")
-    ws.freeze_panes = "A2"
-
-    for r in rows:
-        posted = r.posted_at.astimezone(IST).replace(tzinfo=None) if r.posted_at else None
-        account = f"{r.account} (repost of {r.author})" if r.repost and r.author else r.account
-        ws.append([account, r.kind, r.company or "", r.round or "", ", ".join(r.investors),
-                   r.amount or "", posted, r.headline, r.snippet, r.url])
-        row = ws.max_row
-        ws.cell(row=row, column=7).number_format = "dd mmm yyyy hh:mm"
-        link = ws.cell(row=row, column=10)
-        link.hyperlink = r.url
-        link.font = Font(color="1A00D9", underline="single")
-
-    for index, (_, width) in enumerate(COLUMNS, start=1):
-        ws.column_dimensions[ws.cell(row=1, column=index).column_letter].width = width
-    ws.auto_filter.ref = ws.dimensions
+    workbook.remove(workbook.active)
+    for stage, rows in funding_by_stage(session, window, source).items():
+        rounds_sheet(workbook, STAGE_TITLES[stage], rows)
 
     buffer = io.BytesIO()
     workbook.save(buffer)
     buffer.seek(0)
     day = utcnow().astimezone(IST).strftime("%Y-%m-%d")
-    name = f"gps-linkedin-{kind or 'all'}-{window.label()}-{day}.xlsx"
+    account = (re.sub(r"[^a-z0-9]+", "-", _labels()[source].lower()).strip("-")
+               if source is not None else "") or "all-accounts"
+    name = f"gps-linkedin-funding-{account}-{window.label()}-{day}.xlsx"
     return StreamingResponse(
         buffer,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

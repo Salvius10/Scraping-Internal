@@ -71,7 +71,8 @@ class RoundOut(BaseModel):
     source_label: str
     headline: str
     url: str
-    origin: str = "feed"         # "feed" (our news sites), "web" (Search web), "pasted"
+    origin: str = "feed"         # "feed" (our news sites), "web" (Search web), "pasted",
+                                 # "linkedin" (the LinkedIn page's export)
     date_approx: bool = False    # time came from "3 days ago", not a stamp
 
 
@@ -241,7 +242,8 @@ def rounds(
 
 # --- Excel ------------------------------------------------------------------------
 
-FOUND_VIA = {"feed": "News feed", "web": "Web search", "pasted": "Your website"}
+FOUND_VIA = {"feed": "News feed", "web": "Web search", "pasted": "Your website",
+             "linkedin": "LinkedIn"}
 
 COLUMNS = [
     ("Company", 28), ("Stage", 12), ("Round", 16), ("Investors", 44),
@@ -250,7 +252,9 @@ COLUMNS = [
 ]
 
 
-def _sheet(workbook, title: str, rows: list[RoundOut]) -> None:
+def rounds_sheet(workbook, title: str, rows: list[RoundOut]) -> None:
+    """One stage's rounds as a sheet. The LinkedIn export writes its funding
+    posts with this too, so both files share one layout."""
     from openpyxl.styles import Alignment, Font, PatternFill
 
     ws = workbook.create_sheet(title=title[:31])
@@ -297,7 +301,7 @@ def rounds_excel(
     workbook.remove(workbook.active)
     stages = [chosen] if chosen else list(STAGE_KEYS.values())
     for s in stages:
-        _sheet(workbook, STAGE_TITLES[s], _rows(session, s, window))
+        rounds_sheet(workbook, STAGE_TITLES[s], _rows(session, s, window))
 
     buffer = io.BytesIO()
     workbook.save(buffer)
