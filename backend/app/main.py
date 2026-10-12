@@ -18,8 +18,8 @@ from fastapi.staticfiles import StaticFiles
 
 from . import scheduler
 from .api import (
-    buckets, chat, events, extract, feed, filter as filter_api, insights, intelligence,
-    linkedin, pasted, refresh, status, vcs,
+    buckets, chat, events, export, extract, feed, filter as filter_api, insights,
+    intelligence, linkedin, pasted, refresh, status, vcs,
 )
 from .config import BACKEND_DIR, settings
 from .db import init_db
@@ -48,6 +48,7 @@ app.include_router(vcs.router)
 app.include_router(events.router)
 app.include_router(pasted.router)
 app.include_router(linkedin.router)
+app.include_router(export.router)
 app.include_router(status.router)
 app.include_router(refresh.router)
 app.include_router(filter_api.router)

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
+import AddToExportButton from "./AddToExport";
 import CopyLink from "./CopyLink";
-import DownloadIcon from "./DownloadIcon";
 import RefreshButton from "./RefreshButton";
 import {
   api, parseTime, type AddLinkedinSourceResponse, type LinkedinKind, type LinkedinKindKey,
@@ -269,15 +269,15 @@ export default function LinkedIn() {
               </button>
             )}
             <RefreshButton scope="linkedin" onDone={reload} onMessage={setNote} />
-            <a
-              className="ins-download"
-              href={api.linkedinExcelUrl(query)}
-              download
-              title="Funding posts only: company, stage, round, investors and amount, one sheet per stage, as in the Startup firms export"
-            >
-              <DownloadIcon />
-              Excel: funding{chosen ? ` · ${chosen.label}` : ""}
-            </a>
+            <AddToExportButton
+              selection={{
+                section: "linkedin", source_id: source ?? undefined,
+                start: start || undefined, end: end || undefined,
+              }}
+              label={`Add funding${chosen ? ` · ${chosen.label}` : ""} to Export`}
+              disabled={badRange || noSources}
+              onMessage={setNote}
+            />
           </div>
         </header>
 

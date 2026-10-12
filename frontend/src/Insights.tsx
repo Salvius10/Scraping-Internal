@@ -7,7 +7,7 @@ import { approxFmt, istDay, PRESETS, publishedFmt, showDay } from "./dates";
 import { useRefreshSync } from "./useRefreshSync";
 import VcFirms from "./VcFirms";
 import Events from "./Events";
-import DownloadIcon from "./DownloadIcon";
+import AddToExportButton from "./AddToExport";
 import { AddPastedSource, PastedSourceList } from "./PastedSources";
 import RefreshButton from "./RefreshButton";
 
@@ -128,14 +128,19 @@ function StartupFirms() {
             onDone={() => { if (!badRange) void load(stage, range); }}
             onMessage={setNote}
           />
-          <a className="ins-download" href={api.roundsExcelUrl(stage, range)} download>
-            <DownloadIcon />
-            Excel: {current?.label ?? "this stage"}
-          </a>
-          <a className="ins-download ins-download--all" href={api.roundsExcelUrl(undefined, range)} download>
-            <DownloadIcon />
-            Excel: all stages
-          </a>
+          <AddToExportButton
+            selection={{ section: "startups", stage, ...range }}
+            label={`Add ${current?.label ?? "this stage"} to Export`}
+            disabled={badRange}
+            onMessage={setNote}
+          />
+          <AddToExportButton
+            selection={{ section: "startups", ...range }}
+            label="Add all stages to Export"
+            quiet
+            disabled={badRange}
+            onMessage={setNote}
+          />
         </div>
       </header>
 

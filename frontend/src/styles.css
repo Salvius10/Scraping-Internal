@@ -1761,7 +1761,8 @@ button {
 /* ── Insights ─────────────────────────────────────────────────────────── */
 
 .shell[data-view="insights"],
-.shell[data-view="linkedin"] { grid-template-columns: minmax(0, 1fr); }
+.shell[data-view="linkedin"],
+.shell[data-view="export"] { grid-template-columns: minmax(0, 1fr); }
 
 .ins {
   display: grid;
@@ -1873,6 +1874,7 @@ button {
 }
 
 .ins-download--all:hover { background: var(--wash); }
+.ins-download:disabled { opacity: 0.45; cursor: default; transform: none; }
 
 /* Publish-date filter: presets for the usual windows, pickers for the rest. */
 .ins-filter {
@@ -2229,6 +2231,54 @@ button {
 }
 
 .li-side-add:hover { background: var(--surface); }
+
+/* --- Export ---------------------------------------------------------- */
+
+.ex-side-empty { margin: 0; padding: 0 var(--s2); font-size: 12.5px; color: var(--ink-soft); }
+
+.ex-sel {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 8px var(--s3);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  border: 1px solid var(--rule-soft);
+}
+
+.ex-sel + .ex-sel { margin-top: var(--s1); }
+.ex-sel-label { font-size: 13px; font-weight: 600; color: var(--ink); }
+.ex-sel-meta { font-size: 11.5px; color: var(--ink-mid); font-variant-numeric: tabular-nums; }
+.ex-sel-remove { align-self: flex-start; margin: 2px 0 0; }
+
+.ex-summary {
+  margin: 0;
+  padding: var(--s2) var(--s5);
+  font-size: 12.5px;
+  color: var(--ink-mid);
+  border-bottom: 1px solid var(--rule);
+}
+
+.ex-stage {
+  display: block;
+  font-size: 11.5px;
+  color: var(--ink-soft);
+}
+
+.ex-via { white-space: nowrap; }
+
+.ex-via-tag {
+  display: inline-block;
+  margin: 0 4px 2px 0;
+  padding: 0 6px;
+  border-radius: var(--r-sm);
+  background: var(--wash);
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--brand);
+}
+
+.ex-via-tag[data-origin="linkedin"] { background: var(--accent-tint); color: var(--accent-ink); }
 
 .li-kind-count {
   margin-left: 6px;

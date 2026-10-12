@@ -711,8 +711,11 @@ ago") are marked approximate and shown as a day only. Cost per click: about
 8-16 Firecrawl credits and ~$0.003; a failed query is reported, not fatal.
 
 Excel columns: Company, Stage, Round, Investors, Amount, Published (IST, a
-real Excel date), Source, Headline, Link (clickable), with a frozen, filterable
-header. The page follows the scheduler through the same shared hook as the
+real Excel date), Source, Found via, Headline, Link (clickable), with a frozen,
+filterable header. The page itself no longer downloads: its "Add \<stage\> to
+Export" and "Add all stages to Export" buttons send the tab or every stage,
+with the dates, to the Export section (`api/export.py`), which downloads this
+layout. The `.xlsx` endpoints stay as API routes. The page follows the scheduler through the same shared hook as the
 feed (`useRefreshSync`), and reloads when new stories land.
 
 #### `api/vcs.py` + `ingest/vc_firms.py` — Insights: VC firms
@@ -953,7 +956,9 @@ via, Headline, Link) and one sheet per stage. Stage comes from the round the
 model read, by the tabs' rule (`coerce_stage`: Pre-Series A is Seed, no round
 is Other rounds), so the file makes no model call. Source is the account
 ("repost of X" when it was), Found via is "LinkedIn". It follows the account
-and dates chosen on the page.
+and dates chosen on the page. On the page the button is now "Add funding to
+Export", which sends the same Funding posts to the Export section instead;
+`/api/linkedin.xlsx` stays as an API route.
 
 Tables: `linkedin_sources`, `linkedin_posts` (unique per account and LinkedIn
 post id, so a re-read never stores or pays the model for a post twice) and
@@ -963,6 +968,51 @@ Not yet run live: how the actor marks a repost, and what it returns for a
 private or missing account, are not documented, so both are handled
 defensively (an author other than the account; any `error`/`message` row).
 Check them on the first real read.
+
+#### `api/export.py` — Export
+
+A section of its own in the navbar: one list of funding rounds from Startup
+firms and LinkedIn, duplicates removed, downloaded as one Excel file. "Add to
+Export" on those pages saves what the reader is looking at as a **selection**
+(`export_selections`): a stage tab or all stages with dates, or one LinkedIn
+account or all with dates (Funding posts only). A selection is a filter, never
+a copy: every one is re-run whenever Export is read, so rounds a later refresh
+brings in appear on their own, and a story later merged or reclassified drops
+out.
+
+```
+GET    /api/export                       merged rounds, newest first; selections
+                                         with what each holds; counts per stage;
+                                         how many duplicates were removed
+GET    /api/export.xlsx                  the Startup firms layout, a sheet per stage
+POST   /api/export/selections {section, stage?, source_id?, start?, end?}
+         -> rounds it holds, how many are new, how many were already in Export
+DELETE /api/export/selections/{id}       take one back
+DELETE /api/export/selections            empty the list
+```
+
+**Duplicates.** The same row reached by two selections counts once. Two rows
+are one deal when they name the same company -- compared in one spelling,
+case, punctuation and a trailing "Pvt Ltd"/"Limited" aside -- at the same
+stage within 14 days (`web_rounds.DUPLICATE_DAYS`, the rule Search web and
+pasted websites already use). Undated rows and rows with no company are never
+merged. The copy kept is the most trusted source's -- news feed, then your
+websites, Search web, LinkedIn -- and a round, amount or investors it lacks is
+filled from the duplicate; Found via names every source ("News feed,
+LinkedIn"). Adding a selection reports how many of its rounds were new and how
+many were merged away.
+
+Checked against a copy of the real database (2026-10-12, $0): all stages of
+Startup firms held 196 rows, 25 of them the same deal from two outlets that
+the feed's own dedupe had kept apart (Nat Habit, Arivihan, Ola Electric's
+rights issue...), leaving 171; one LinkedIn account added 20 with no overlap.
+One merge was wrong: Orange Retail Finance's Rs 100 crore debt and a report
+that it "eyes equity raise", both in Other rounds within 5 days. The labels
+cannot tell them apart -- Bharat Housing Network's real duplicate has the same
+Debt-and-none pair -- so the rule stays.
+
+A removed LinkedIn account takes its selections with it. Reads only: no fetch,
+no model, $0.
 
 #### `api/buckets.py` — buckets, kept in step with the scheduler
 
