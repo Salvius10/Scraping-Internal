@@ -4,7 +4,7 @@ import DownloadIcon from "./DownloadIcon";
 import { AddPastedSource, PastedSourceList } from "./PastedSources";
 import RefreshButton from "./RefreshButton";
 import {
-  api, parseTime, type VcFirm, type VcKind, type VcOrigin, type VcPost, type VcsResponse,
+  api, safeHref, parseTime, type VcFirm, type VcKind, type VcOrigin, type VcPost, type VcsResponse,
 } from "./api";
 import { approxFmt, istDay, PRESETS, publishedFmt, readAgo, showDay } from "./dates";
 import { useRefreshSync } from "./useRefreshSync";
@@ -36,7 +36,7 @@ function Published({ post }: { post: VcPost }) {
 function FirmNote({ firm }: { firm: VcFirm }) {
   return (
     <p className="vc-firm-note">
-      <a href={firm.home} target="_blank" rel="noreferrer noopener">{firm.label}</a>
+      <a href={safeHref(firm.home)} target="_blank" rel="noreferrer noopener">{firm.label}</a>
       {firm.reads.map((r, i) => (
         <span key={`${r.via}-${i}`} className={r.last_error ? "vc-error" : undefined}>
           {" · "}{r.label[0].toUpperCase() + r.label.slice(1)}, {readAgo(r.last_read)}
@@ -247,7 +247,7 @@ export default function VcFirms() {
                 <tr key={p.id}>
                   {!firm && <td className="vc-firm">{p.firm_label}</td>}
                   <td className="vc-news">
-                    <a href={p.url} target="_blank" rel="noreferrer noopener">{p.headline}</a>
+                    <a href={safeHref(p.url)} target="_blank" rel="noreferrer noopener">{p.headline}</a>
                     {p.company && <span className="vc-company">{p.company}</span>}
                   </td>
                   <td>

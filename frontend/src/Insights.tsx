@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import CopyLink from "./CopyLink";
 import {
-  api, parseTime, type DateRange, type RoundsResponse, type SearchWebResponse, type StageKey,
+  api, safeHref, parseTime, type DateRange, type RoundsResponse, type SearchWebResponse, type StageKey,
 } from "./api";
 import { approxFmt, istDay, PRESETS, publishedFmt, showDay } from "./dates";
 import { useRefreshSync } from "./useRefreshSync";
@@ -275,11 +275,11 @@ function StartupFirms() {
               {rows.map((r) => (
                 <tr key={r.id}>
                   <td className="ins-company">
-                    <a href={r.url} target="_blank" rel="noreferrer noopener" title={r.headline}>
+                    <a href={safeHref(r.url)} target="_blank" rel="noreferrer noopener" title={r.headline}>
                       {r.company ?? "Unnamed company"}
                     </a>
                   </td>
-                  <td>{r.round ?? r.stage}</td>
+                  <td className="ins-round">{r.round ?? r.stage}</td>
                   <td className="ins-investors">
                     {r.investors.length ? r.investors.join(", ") : <span className="ins-na">Not named</span>}
                   </td>

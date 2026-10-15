@@ -22,6 +22,7 @@ from ..db import get_session
 from ..llm.bedrock import LlmUnavailable, invoke
 from ..llm.budget import BudgetExceeded, get_spend
 from ..models import Article
+from ..schemas import TextIn
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["chat"])
@@ -38,8 +39,8 @@ SYSTEM_PROMPT = (
 class ChatRequest(BaseModel):
     mode: str = Field(description="explain | summarise | ask")
     article_id: int | None = None
-    article_ids: list[int] = []
-    question: str | None = None
+    article_ids: list[int] = Field(default_factory=list, max_length=5000)
+    question: TextIn | None = None
     premium: bool = False
 
 

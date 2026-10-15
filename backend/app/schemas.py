@@ -3,10 +3,18 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from .models import Category
+
+# Hard ceilings on what a request may carry. Each endpoint still checks its own
+# tighter limits and answers in words; these only stop an oversized body from
+# reaching a model prompt or the database at all.
+UrlIn = Annotated[str, Field(max_length=4000)]
+TextIn = Annotated[str, Field(max_length=4000)]
+LabelIn = Annotated[str, Field(max_length=500)]
 
 
 class ArticleOut(BaseModel):

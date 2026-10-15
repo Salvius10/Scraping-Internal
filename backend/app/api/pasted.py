@@ -25,6 +25,7 @@ from ..ingest.pasted_sources import (
 )
 from ..ingest.vc_firms import load_firms
 from ..models import PastedRound, PastedSourceRead, VcKind, VcPost
+from ..schemas import LabelIn, UrlIn
 
 router = APIRouter(prefix="/api/insights", tags=["insights"])
 
@@ -82,10 +83,10 @@ def pasted_sources(session: Session, section: str) -> list[PastedSourceOut]:
 
 
 class AddSourceIn(BaseModel):
-    section: str
-    url: str
-    label: str | None = None
-    firm: str | None = None
+    section: LabelIn
+    url: UrlIn
+    label: LabelIn | None = None
+    firm: LabelIn | None = None
 
 
 class AddSourceOut(BaseModel):

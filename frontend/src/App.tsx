@@ -8,7 +8,7 @@ import LinkedIn from "./LinkedIn";
 import RefreshButton from "./RefreshButton";
 import Sidebar from "./Sidebar";
 import {
-  api, categoryColor, categoryTextColor, parseTime, sourceLabel,
+  api, safeHref, categoryColor, categoryTextColor, parseTime, sourceLabel,
   type ActivityDay, type Article, type Bucket, type Category, type Facets,
   type FilterSpec, type Status,
 } from "./api";
@@ -277,7 +277,7 @@ function Entry({
         </div>
         <a
           className="entry-headline"
-          href={article.url}
+          href={safeHref(article.url)}
           target="_blank"
           rel="noreferrer noopener"
         >

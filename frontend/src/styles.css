@@ -39,7 +39,11 @@
   --accent-fill: #c64e00;
   --accent-fill-hover: #b84a00;
   --accent-tint: #fff1e6;
-  --glow-accent: radial-gradient(120% 140% at 100% 0%, rgba(254, 110, 6, 0.75), transparent 60%);
+
+  /* Filled surfaces are flat brand colour. Glows and gradients on every band
+     and button were the most generic thing on the page, so colour now does
+     the work alone; a hover is a one-step darker shade of the same hue. */
+  --brand-hover: #1500b0;
 
   /* Depth, tinted with the brand blue rather than grey. */
   --shadow: 0 1px 2px rgba(26, 0, 217, 0.05), 0 10px 28px -14px rgba(26, 0, 217, 0.22);
@@ -54,6 +58,8 @@
   --ink-soft: #656c81;
   --rule: #dde5f5;
   --rule-soft: #edf2fc;
+  --row-hover: #fafbff;     /* table and result rows under the pointer */
+  --switch-off: #c3cde3;
 
   /* One family per brand colour. */
   --cat-capital: var(--brand);
@@ -157,6 +163,10 @@ button {
   grid-template-columns: var(--rail) minmax(0, 1fr);
   gap: 0 var(--s5);
   align-items: start;
+  /* min-height stretches the grid to the viewport; without this the spare
+     height is shared between the rows and short pages (Export, Events,
+     Intelligence) float halfway down the screen. */
+  align-content: start;
   max-width: var(--max);
   margin: 0 auto;
   padding: 0 var(--s5) var(--s6);
@@ -179,11 +189,8 @@ button {
   height: var(--head);
   margin: 0 calc(var(--s5) * -1) var(--s5);
   padding: 0 var(--s5);
-  /* Primary band, lit from the top right by the secondary blue. */
-  background:
-    radial-gradient(90% 180% at 100% 0%, rgba(94, 158, 255, 0.45), transparent 60%),
-    radial-gradient(60% 140% at 0% 100%, rgba(254, 110, 6, 0.16), transparent 60%),
-    var(--brand);
+  /* The primary band, closed by an orange rule. */
+  background: var(--brand);
   box-shadow: inset 0 -3px 0 var(--accent);
   color: var(--surface);
   position: sticky;
@@ -246,7 +253,7 @@ button {
   height: 24px;
   align-self: center;
   border-radius: var(--r-sm);
-  background: var(--glow-accent), var(--accent-fill);
+  background: var(--accent-fill);
   color: var(--surface);
   font-size: 13px;
   font-weight: 700;
@@ -494,7 +501,7 @@ button {
 /* The page's one orange action. */
 .ask-toggle--cta {
   border-color: var(--accent-fill);
-  background: var(--glow-accent), var(--accent-fill);
+  background: var(--accent-fill);
   color: var(--surface);
   font-weight: 600;
 }
@@ -803,9 +810,7 @@ button {
 .bucket:hover { background: var(--wash); color: var(--brand); }
 
 .bucket[aria-pressed="true"] {
-  background:
-    radial-gradient(120% 160% at 100% 0%, rgba(94, 158, 255, 0.45), transparent 60%),
-    var(--brand);
+  background: var(--brand);
   color: var(--surface);
   font-weight: 600;
 }
@@ -886,9 +891,7 @@ button {
   justify-content: space-between;
   gap: var(--s3);
   padding: var(--s4) var(--s4) calc(var(--s4) + 3px);
-  background:
-    radial-gradient(110% 160% at 100% 0%, rgba(94, 158, 255, 0.5), transparent 60%),
-    var(--brand);
+  background: var(--brand);
   box-shadow: inset 0 -3px 0 var(--accent);
   color: var(--surface);
 }
@@ -950,7 +953,7 @@ button {
   height: 36px;
   padding: 0 var(--s3);
   border-radius: var(--r-sm);
-  background: var(--glow-accent), var(--accent-fill);
+  background: var(--accent-fill);
   color: var(--surface);
   font-size: 12.5px;
   font-weight: 600;
@@ -959,7 +962,6 @@ button {
 }
 
 .side-go:not(:disabled):hover { background: var(--accent-fill-hover); }
-.side-go:disabled { opacity: 0.45; cursor: default; }
 
 .side-primary, .side-secondary {
   height: 34px;
@@ -971,13 +973,11 @@ button {
 }
 
 .side-primary {
-  background:
-    radial-gradient(120% 160% at 100% 0%, rgba(94, 158, 255, 0.45), transparent 60%),
-    var(--brand);
+  background: var(--brand);
   color: var(--surface);
 }
 
-.side-primary:not(:disabled):hover { background: #2a12e8; }
+.side-primary:not(:disabled):hover { background: var(--brand-hover); }
 
 .side-secondary {
   border: 1px solid var(--brand-2);
@@ -986,7 +986,6 @@ button {
 }
 
 .side-secondary:not(:disabled):hover { background: var(--wash); }
-.side-primary:disabled, .side-secondary:disabled { opacity: 0.45; cursor: default; }
 
 /* Result of a phrase filter: a confirmed state, so it gets a quiet frame. */
 .side-status {
@@ -1028,7 +1027,7 @@ button {
   width: 32px;
   height: 18px;
   border-radius: 9px;
-  background: #c3cde3;
+  background: var(--switch-off);
   transition: background var(--dur) var(--ease);
 }
 
@@ -1269,6 +1268,11 @@ button {
 
 .x-panel-head h2 { margin: 0; font-size: 14px; font-weight: 600; color: var(--brand); }
 
+/* .sidebar-close is drawn for the blue band (white text); on this white
+   panel it was invisible. */
+.x-panel .sidebar-close { border-color: var(--rule); color: var(--ink-mid); }
+.x-panel .sidebar-close:hover { border-color: var(--brand); background: var(--page); color: var(--brand); }
+
 .x-form { display: flex; flex-direction: column; gap: var(--s2); }
 
 .x-prompt {
@@ -1292,15 +1296,13 @@ button {
   height: 32px;
   padding: 0 var(--s5);
   border-radius: var(--r-sm);
-  background: var(--glow-accent), var(--accent-fill);
+  background: var(--accent-fill);
   color: var(--surface);
   font-size: 13px;
   font-weight: 600;
 }
 
 .x-run:not(:disabled):hover { background: var(--accent-fill-hover); }
-
-.x-run:disabled { opacity: 0.45; cursor: default; }
 .x-panel .intel-pending { margin: var(--s3) 0 0; }
 
 .x-result {
@@ -1433,15 +1435,13 @@ button {
   height: 40px;
   padding: 0 var(--s5);
   border-radius: var(--r-sm);
-  background: var(--glow-accent), var(--accent-fill);
+  background: var(--accent-fill);
   color: var(--surface);
   font-size: 13.5px;
   font-weight: 600;
 }
 
 .intel-form button:not(:disabled):hover { background: var(--accent-fill-hover); }
-
-.intel-form button:disabled { opacity: 0.45; cursor: default; }
 
 .intel-controls {
   display: flex;
@@ -1539,12 +1539,11 @@ button {
 }
 
 .fc-download:not(:disabled):hover { background: var(--wash); }
-.fc-download:disabled { opacity: 0.45; cursor: default; }
 
 /* Scrape page is the action on every row: orange, like every other action. */
 .fc-scrape {
   border-color: var(--accent-fill);
-  background: var(--glow-accent), var(--accent-fill);
+  background: var(--accent-fill);
   color: var(--surface);
 }
 
@@ -1566,7 +1565,7 @@ button {
 }
 
 .fc-result:last-child { border-bottom: none; }
-.fc-result:hover { background: #fafbff; }
+.fc-result:hover { background: var(--row-hover); }
 
 .fc-result-main {
   display: grid;
@@ -1748,10 +1747,7 @@ button {
   margin-bottom: var(--s4);
   padding: var(--s5);
   border-radius: var(--r);
-  background:
-    radial-gradient(90% 160% at 100% 0%, rgba(94, 158, 255, 0.5), transparent 58%),
-    radial-gradient(50% 120% at 0% 100%, rgba(254, 110, 6, 0.18), transparent 60%),
-    var(--brand);
+  background: var(--brand);
   box-shadow: var(--shadow), inset 0 -3px 0 var(--accent);
 }
 
@@ -1805,9 +1801,7 @@ button {
 .ins-side-item:hover { background: var(--surface); color: var(--ink); }
 
 .ins-side-item[aria-current="page"] {
-  background:
-    radial-gradient(120% 160% at 100% 0%, rgba(94, 158, 255, 0.45), transparent 60%),
-    var(--brand);
+  background: var(--brand);
   color: var(--surface);
   font-weight: 600;
 }
@@ -1855,7 +1849,7 @@ button {
   height: 34px;
   padding: 0 var(--s3);
   border-radius: var(--r-sm);
-  background: var(--glow-accent), var(--accent-fill);
+  background: var(--accent-fill);
   font-size: 12.5px;
   font-weight: 600;
   color: var(--surface);
@@ -1864,8 +1858,8 @@ button {
   transition: background var(--dur) var(--ease), transform var(--dur) var(--ease);
 }
 
-.ins-download:hover { background: var(--accent-fill-hover); }
-.ins-download:active { transform: translateY(1px); }
+.ins-download:not(:disabled):hover { background: var(--accent-fill-hover); }
+.ins-download:not(:disabled):active { transform: translateY(1px); }
 
 .ins-download--all {
   border: 1px solid var(--brand-2);
@@ -1873,8 +1867,7 @@ button {
   color: var(--brand);
 }
 
-.ins-download--all:hover { background: var(--wash); }
-.ins-download:disabled { opacity: 0.45; cursor: default; transform: none; }
+.ins-download--all:not(:disabled):hover { background: var(--wash); }
 
 /* Publish-date filter: presets for the usual windows, pickers for the rest. */
 .ins-filter {
@@ -1958,7 +1951,7 @@ button {
   margin-left: auto;
   padding: 0 var(--s3);
   border-radius: var(--r-sm);
-  background: var(--glow-accent), var(--accent-fill);
+  background: var(--accent-fill);
   font-size: 12.5px;
   font-weight: 600;
   color: var(--surface);
@@ -1968,7 +1961,6 @@ button {
 }
 
 .ins-web:not(:disabled):hover { background: var(--accent-fill-hover); }
-.ins-web:disabled { opacity: 0.45; cursor: default; }
 
 .ins-searching { margin: var(--s3) var(--s5) 0; }
 
@@ -2063,13 +2055,14 @@ button {
 }
 
 .ins-table tbody tr { transition: background var(--dur) var(--ease); }
-.ins-table tbody tr:hover { background: #fafbff; }
+.ins-table tbody tr:hover { background: var(--row-hover); }
 .ins-table tbody tr:last-child td { border-bottom: none; }
 
 .ins-company a { font-weight: 600; color: var(--ink); text-decoration: none; }
 .ins-company a:hover { color: var(--brand); }
 .ins-investors { max-width: 320px; color: var(--ink-mid); }
 .ins-amount { font-weight: 600; white-space: nowrap; }
+.ins-round { white-space: nowrap; }
 .ins-time { white-space: nowrap; color: var(--ink-mid); }
 .ins-source { white-space: nowrap; color: var(--brand); font-weight: 500; }
 .ins-source .copy-link { vertical-align: middle; }
@@ -2141,7 +2134,7 @@ button {
 .vc-kind--accent { border-color: var(--accent); color: var(--accent-ink); }
 .vc-kind--wash { color: var(--ink-soft); }
 
-.vc-round { display: block; margin-top: 2px; font-size: 12px; color: var(--ink-soft); }
+.vc-round { display: block; margin-top: 2px; font-size: 12px; color: var(--ink-soft); white-space: nowrap; }
 
 .vc-news-tag { background: var(--wash); color: var(--brand); }
 
@@ -2301,7 +2294,38 @@ button {
 
 .li-table .vc-firm { max-width: 200px; white-space: normal; }
 
+/* ── Disabled actions ─────────────────────────────────────────────────── */
+
+/* A filled action that cannot run yet is a flat neutral, not its own colour
+   at half strength: a faded orange reads as a broken button, a grey one as
+   "not yet". The quiet outlined buttons keep their outline and just dim. */
+.side-go:disabled,
+.side-primary:disabled,
+.x-run:disabled,
+.intel-form button:disabled,
+.ins-web:disabled,
+.ins-download:not(.ins-download--all):disabled {
+  opacity: 1;
+  border-color: transparent;
+  background: var(--rule-soft);
+  color: var(--ink-soft);
+  cursor: not-allowed;
+}
+
+.side-secondary:disabled,
+.ins-download--all:disabled,
+.fc-download:disabled { opacity: 0.5; cursor: not-allowed; }
+
 /* ── Responsive ───────────────────────────────────────────────────────── */
+
+/* Narrow screens, and the feed beside the open assistant: the category
+   column moves under the story so the headline keeps its width. */
+.shell[data-sidebar="open"] .entry { grid-template-columns: var(--spine) 3px minmax(0, 1fr); }
+.shell[data-sidebar="open"] .entry-meta {
+  grid-column: 3;
+  justify-content: flex-start;
+  padding-top: 4px;
+}
 
 @media (max-width: 1100px) {
   .entry { grid-template-columns: var(--spine) 3px minmax(0, 1fr); }
@@ -2323,8 +2347,20 @@ button {
     padding: 0 var(--s4) var(--s5);
     gap: 0;
   }
-  .masthead { margin: 0 calc(var(--s4) * -1) var(--s4); padding: 0 var(--s4); }
-  .masthead-left { gap: var(--s3); }
+  /* The band wraps to two lines here (sections, then freshness and Refresh),
+     so it grows to fit instead of spilling the second line onto the page.
+     It stops being sticky so the search bar can take the top edge. */
+  .masthead {
+    position: relative;
+    height: auto;
+    min-height: var(--head);
+    margin: 0 calc(var(--s4) * -1) var(--s4);
+    padding: var(--s2) var(--s4) calc(var(--s2) + 3px);
+    gap: var(--s1) var(--s3);
+  }
+  .masthead-left { gap: var(--s3); max-width: 100%; }
+  .masthead-right { width: 100%; justify-content: space-between; }
+  .views button { height: 36px; }
   /* Four sections do not fit beside the wordmark on a phone: the tabs scroll. */
   .views { min-width: 0; overflow-x: auto; scrollbar-width: none; }
   .refresh-btn--dark { padding: 0 var(--s2); }
@@ -2335,16 +2371,37 @@ button {
   .fc-scrape { grid-column: 2; justify-self: start; }
   .fc-scraping, .fc-scraped { margin-left: 0; }
   .activity { display: none; }
+  /* The filters were two tall lists that filled the first screen before a
+     single story. Here each group is one row that scrolls sideways. */
   .shell[data-sidebar="open"] .rail { display: flex; }
   .rail {
     position: static;
     max-height: none;
     display: flex;
-    gap: var(--s5);
-    overflow-x: auto;
-    padding: var(--s3) 0;
+    flex-direction: column;
+    gap: var(--s2);
+    overflow: visible;
+    padding: 0;
   }
-  .rail-group { margin-bottom: 0; min-width: 180px; }
+  .rail-group {
+    display: flex;
+    align-items: center;
+    gap: var(--s1);
+    margin: 0 calc(var(--s4) * -1);
+    padding: 0 var(--s4) 2px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .rail-group h2 { flex: none; margin: 0; padding: 0 var(--s1) 0 0; }
+  .rail-item {
+    flex: none;
+    width: auto;
+    border: 1px solid var(--rule);
+    background: var(--surface);
+    white-space: nowrap;
+  }
+  .rail-item[aria-pressed="true"] { border-color: var(--brand); }
+  .rail-clear { align-self: flex-start; margin: 0; }
   .entry {
     grid-template-columns: 40px 3px minmax(0, 1fr);
     padding: 10px var(--s3);

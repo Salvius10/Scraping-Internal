@@ -1,7 +1,7 @@
 import { useState } from "react";
 import CopyLink from "./CopyLink";
 import {
-  api, parseTime, type ScrapeResponse, type SearchKind, type WebResult,
+  api, safeHref, parseTime, type ScrapeResponse, type SearchKind, type WebResult,
   type WebSearchResponse,
 } from "./api";
 
@@ -72,7 +72,7 @@ function ResultRow({
         <div className="fc-result-body">
           <h3 className="fc-title">
             <span className="fc-rank">#{result.n}</span>
-            <a href={result.url} target="_blank" rel="noreferrer noopener">{result.title}</a>
+            <a href={safeHref(result.url)} target="_blank" rel="noreferrer noopener">{result.title}</a>
           </h3>
           <div className="fc-url">
             <span>{path}</span>

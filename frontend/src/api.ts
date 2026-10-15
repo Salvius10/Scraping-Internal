@@ -649,3 +649,14 @@ const SOURCE_LABELS: Record<string, string> = {
 export function sourceLabel(name: string): string {
   return SOURCE_LABELS[name] ?? name;
 }
+
+/** An href for a link that came from another site, or undefined.
+ *
+ * The backend keeps only http(s) links, but these strings started out in
+ * feeds, scraped pages and model output, so a `javascript:` or `data:` link
+ * must never reach an <a> even if one slipped through. Without an href the
+ * anchor renders as plain text.
+ */
+export function safeHref(url: string | null | undefined): string | undefined {
+  return url && /^https?:\/\//i.test(url.trim()) ? url : undefined;
+}

@@ -288,10 +288,20 @@ def main(argv: list[str] | None = None) -> int:
         ap.error("pass --once for a single run; for the 12h schedule run "
                  "`python -m app.scheduler` or start the API server")
 
-    result = refresh(
-        only=args.source, skip_paid=args.skip_paid,
-        describe=not args.no_describe, enrich=not args.no_enrich,
-    )
+    # The server's scheduler takes the same lock, so a run by hand can never
+    # overlap a scheduled one and pay for the same work twice.
+    from ..proclock import refresh_lock
+    lock = refresh_lock()
+    if not lock.acquire():
+        print("A refresh is already running in another process; try again when it ends.")
+        return 1
+    try:
+        result = refresh(
+            only=args.source, skip_paid=args.skip_paid,
+            describe=not args.no_describe, enrich=not args.no_enrich,
+        )
+    finally:
+        lock.release()
     _report(result.runs)
 
     if result.described is not None:

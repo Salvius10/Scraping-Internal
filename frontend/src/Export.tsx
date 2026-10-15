@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import CopyLink from "./CopyLink";
 import DownloadIcon from "./DownloadIcon";
 import {
-  api, parseTime, type ExportResponse, type ExportSelection, type RoundOrigin, type StageKey,
+  api, safeHref, parseTime, type ExportResponse, type ExportSelection, type RoundOrigin, type StageKey,
 } from "./api";
 import { approxFmt, publishedFmt } from "./dates";
 import { useRefreshSync } from "./useRefreshSync";
@@ -225,11 +225,11 @@ export default function Export() {
                 {rows.map((r) => (
                   <tr key={r.id}>
                     <td className="ins-company">
-                      <a href={r.url} target="_blank" rel="noreferrer noopener" title={r.headline}>
+                      <a href={safeHref(r.url)} target="_blank" rel="noreferrer noopener" title={r.headline}>
                         {r.company ?? "Unnamed company"}
                       </a>
                     </td>
-                    <td>
+                    <td className="ins-round">
                       {r.round ?? r.stage}
                       {tab === "all" && r.round && r.round !== r.stage && (
                         <span className="ex-stage">{r.stage}</span>

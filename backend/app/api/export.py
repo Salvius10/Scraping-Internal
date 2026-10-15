@@ -162,7 +162,8 @@ class ExportOut(BaseModel):
     duplicates: int              # rows removed as repeats of one deal
 
 
-def _build(session: Session) -> tuple[list[SelectionOut], list[RoundOut], int]:
+def _gather(session: Session) -> tuple[list[SelectionOut], list[RoundOut]]:
+    """Every selection, and every row it holds now, before duplicates are merged."""
     accounts = {s.id: s.label for s in linkedin_sources()}
     selections, rows = [], []
     for sel in _all_selections(session):
@@ -171,6 +172,11 @@ def _build(session: Session) -> tuple[list[SelectionOut], list[RoundOut], int]:
         selections.append(SelectionOut(
             id=sel.id, section=sel.section, label=_label(sel, accounts), dates=_dates(sel),
             rounds=len(held), added_at=sel.added_at))
+    return selections, rows
+
+
+def _build(session: Session) -> tuple[list[SelectionOut], list[RoundOut], int]:
+    selections, rows = _gather(session)
     merged = merge(rows)
     return selections, merged, len(rows) - len(merged)
 
@@ -244,18 +250,20 @@ def add_selection(request: AddIn) -> AddOut:
         )).first()
         if existing is not None:
             return AddOut(added=False, error="That is already in Export.")
-        _, before, _ = _build(s)
+        # Each selection is re-run once: the rows already in Export, then the new one's.
+        _, rows = _gather(s)
+        before = len(merge(rows))
         sel = ExportSelection(section=request.section, stage=request.stage,
                               source_id=request.source_id, start_day=request.start,
                               end_day=request.end)
         s.add(sel)
         s.flush()
-        held = len(_selection_rows(s, sel))
-        _, after, _ = _build(s)
+        held = _selection_rows(s, sel)
+        after = len(merge(rows + held))
         label = _label(sel, {a.id: a.label for a in linkedin_sources()})
-        new = max(0, len(after) - len(before))
-        return AddOut(added=True, selection_id=sel.id, label=label, rounds=held, new=new,
-                      duplicates=max(0, held - new), total=len(after))
+        new = max(0, after - before)
+        return AddOut(added=True, selection_id=sel.id, label=label, rounds=len(held),
+                      new=new, duplicates=max(0, len(held) - new), total=after)
 
 
 @router.delete("/selections/{selection_id}")

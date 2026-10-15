@@ -3,7 +3,7 @@ import CopyLink from "./CopyLink";
 import DownloadIcon from "./DownloadIcon";
 import RefreshButton from "./RefreshButton";
 import {
-  api, parseTime, type AddEventSourceResponse, type EventItem, type EventSourceInfo,
+  api, safeHref, parseTime, type AddEventSourceResponse, type EventItem, type EventSourceInfo,
   type EventsResponse, type EventWhen,
 } from "./api";
 import { approxFmt, publishedFmt, readAgo, showDay } from "./dates";
@@ -155,7 +155,7 @@ function SourceNote({
 }) {
   return (
     <p className="vc-firm-note">
-      <a href={source.url} target="_blank" rel="noreferrer noopener">{source.label}</a>
+      <a href={safeHref(source.url)} target="_blank" rel="noreferrer noopener">{source.label}</a>
       {" · "}{source.via_label}{source.site ? ", checked weekly" : ""}
       {source.india_only ? ", India events only" : ""}
       <span className={source.last_error ? "vc-error" : undefined}>
@@ -390,7 +390,7 @@ export default function Events() {
                 <tr key={e.id}>
                   <td className="ins-time"><When event={e} /></td>
                   <td className="vc-news">
-                    <a href={e.url} target="_blank" rel="noreferrer noopener">{e.title}</a>
+                    <a href={safeHref(e.url)} target="_blank" rel="noreferrer noopener">{e.title}</a>
                     {e.description && <span className="vc-company ev-desc">{e.description}</span>}
                   </td>
                   {!organiser && <td className="vc-firm">{e.organiser}</td>}

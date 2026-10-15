@@ -112,7 +112,9 @@ def parse_feed(content: bytes | str, source_name: str) -> list[FeedItem]:
     for entry in parsed.entries:
         url = (getattr(entry, "link", "") or "").strip()
         headline = clean_text(getattr(entry, "title", None), limit=300)
-        if not url or not headline:
+        # The link becomes an href on the page; anything but a web address
+        # (javascript:, data:) is never stored.
+        if not url.lower().startswith(("http://", "https://")) or not headline:
             continue
 
         desc = clean_text(

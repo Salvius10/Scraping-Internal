@@ -22,7 +22,7 @@ from ..ingest.sources import load_sources
 from ..llm.bedrock import LlmUnavailable, invoke_json
 from ..llm.budget import BudgetExceeded
 from ..models import Category, FilterCache
-from ..schemas import FilterSpec
+from ..schemas import FilterSpec, TextIn
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["filter"])
@@ -36,7 +36,7 @@ SYSTEM_PROMPT = (
 
 
 class FilterRequest(BaseModel):
-    phrase: str
+    phrase: TextIn
 
 
 class FilterResponse(BaseModel):
@@ -190,21 +190,24 @@ def examples() -> dict:
 
 def apply_filter(stmt, spec: FilterSpec):
     """Fold a FilterSpec into a SQLAlchemy select. Used by the feed endpoint."""
-    from ..models import Article
     from sqlalchemy import or_
+
+    from ..db import LIKE_ESCAPE, like_pattern
+    from ..models import Article
 
     if spec.categories:
         stmt = stmt.where(Article.category.in_(spec.categories))
     if spec.sources:
         stmt = stmt.where(Article.source.in_(spec.sources))
     if spec.company:
-        stmt = stmt.where(Article.company.ilike(f"%{spec.company}%"))
+        stmt = stmt.where(Article.company.ilike(like_pattern(spec.company),
+                                                escape=LIKE_ESCAPE))
     if spec.query:
-        term = f"%{spec.query}%"
+        term = like_pattern(spec.query)
         stmt = stmt.where(or_(
-            Article.headline.ilike(term),
-            Article.description.ilike(term),
-            Article.company.ilike(term),
+            Article.headline.ilike(term, escape=LIKE_ESCAPE),
+            Article.description.ilike(term, escape=LIKE_ESCAPE),
+            Article.company.ilike(term, escape=LIKE_ESCAPE),
         ))
     return stmt
 

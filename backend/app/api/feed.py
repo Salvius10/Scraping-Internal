@@ -14,7 +14,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from ..config import settings
-from ..db import get_session
+from ..db import LIKE_ESCAPE, get_session, like_pattern
 from ..models import Article, Category, utcnow
 from ..schemas import ArticleOut, FeedPage
 
@@ -66,13 +66,13 @@ def list_articles(
     if source:
         stmt = stmt.where(Article.source.in_(source))
     if company:
-        stmt = stmt.where(Article.company.ilike(f"%{company}%"))
+        stmt = stmt.where(Article.company.ilike(like_pattern(company), escape=LIKE_ESCAPE))
     if q:
-        term = f"%{q}%"
+        term = like_pattern(q)
         stmt = stmt.where(or_(
-            Article.headline.ilike(term),
-            Article.description.ilike(term),
-            Article.company.ilike(term),
+            Article.headline.ilike(term, escape=LIKE_ESCAPE),
+            Article.description.ilike(term, escape=LIKE_ESCAPE),
+            Article.company.ilike(term, escape=LIKE_ESCAPE),
         ))
 
     total = session.scalar(

@@ -7,9 +7,8 @@ filter and interrogate the feed in plain English.
 This document is the low-level design: what every module does, why it is shaped
 that way, and what the real data forced us to change.
 
-**Current state:** 267 articles ingested (236 by the pipeline, 31 written
-through by live Intelligence queries), 170 tests passing, **$0.018794 of the
-$7.00 budget spent (0.3%)**.
+**Current state (2026-10-15):** 857 articles ingested (715 canonical), 417
+tests passing, **$0.12932 of the $7.00 budget spent (1.8%)**.
 
 ---
 
@@ -227,6 +226,38 @@ Five gaps were left after Phase 7. All are now closed:
   stock, market") ranked other companies' IPOs above Zepto's. Retrieval now
   ranks stories in three tiers: the entity plus a term, then the entity alone,
   then any term.
+
+### Production hardening (2026-10-15)
+
+A review for production found one serious hole and a set of weaker spots.
+Each fix is covered by `tests/test_hardening.py`, and each of those tests
+fails on the code before the fix.
+
+| Weak spot | Fix |
+|---|---|
+| **The SPA route served any file in the repo.** `GET /..%2F..%2F.env` returned `.env` -- Bedrock, Firecrawl and Apify keys -- and `news.db`. `%2F` decodes before routing, and the handler joined the path onto `dist/` unchecked | `main._dist_file()` resolves the path and serves it only if it is still inside `dist/`; anything else gets `index.html`. An unknown `/api/...` GET is now a 404, not the app |
+| **DNS rebinding past the URL guard.** `check_url` resolved the host, then httpx resolved it again to connect; a host answering public then `127.0.0.1` passed | `extract._PublicOnlyBackend` resolves, checks and connects to the same address in one step; TLS still verifies the host name. Environment proxies are not used by this client |
+| **Concurrent model calls could jointly overshoot a cap.** Each checked the headroom before any had been ledgered | `budget.reserve()` checks and holds the estimate under one lock until the call is recorded; `ensure_budget` counts what is held |
+| **Two refreshes in two processes.** The lock was per process; two workers, or the server plus `--once`, both paid | `proclock.refresh_lock()`: an OS file lock beside the database (released by the OS if a process dies), taken by the scheduler, "Refresh now" and the pipeline CLI |
+| **Search web crashed on a repeated answer** (`UNIQUE constraint failed: web_rounds.url`) and read `"i": 0` as the *last* result; two clicks at once paid twice | Repeated and out-of-range numbers are skipped; one search runs at a time |
+| **`describe` held the write lock across every page fetch** and the 2 s pauses, the bug `enrich` had already fixed | Fetch with no transaction open, write each update in its own short one |
+| **Feed links were not checked for scheme** -- the one ingest path that did not | RSS items keep only http(s) links; the frontend's `safeHref()` refuses anything else as a second guard |
+| LIKE search read `%` and `_` as wildcards | `db.like_pattern()` escapes them |
+| In-process caches (Firecrawl, summaries, extractions) never dropped expired entries | `cache.TTLCache`: expires as it goes, bounded in size |
+| Request bodies had no size limit | `UrlIn`/`TextIn`/`LabelIn` in `schemas.py` cap free text at 4,000 characters (labels 500), above every endpoint's own friendlier limit |
+| `sync_all_chunks` ran one query per article on every refresh | Two queries for the whole corpus |
+| Adding an Export selection re-ran every selection twice | Once |
+| No security headers; a 500 could reach the browser as a traceback in dev | `nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer` on every response; unhandled errors logged and answered `{"detail": "Internal server error"}` |
+| Deprecated `@app.on_event` hooks | A `lifespan` handler |
+
+Housekeeping: `.env.example` lists `AWS_BEARER_TOKEN_BEDROCK`, the key the
+project actually authenticates with; `tsconfig.tsbuildinfo` (a build cache)
+is no longer tracked.
+
+Not changed, and worth knowing before exposing the server beyond one machine:
+**there is no authentication.** Anyone who can reach the port can add
+sources, delete them, and trigger paid reads. Bind to `127.0.0.1` (the
+uvicorn default), or put it behind a proxy that authenticates.
 
 ### Post-phase — UI and a timezone bug
 
@@ -1416,7 +1447,7 @@ are recorded under `intelligence_summary`; Firecrawl credits are billed by Firec
 
 ## 8. Testing
 
-**378 tests, all offline — no test spends money.**
+**417 tests, all offline — no test spends money.**
 
 | File | Tests | Covers |
 |---|---|---|
@@ -1430,6 +1461,7 @@ are recorded under `intelligence_summary`; Firecrawl credits are billed by Firec
 | `test_extract.py` | 32 | URL guard (private IPs, metadata endpoint, schemes, ports, redirect-to-localhost), size/type limits, HTML cleaning, result shapes, budget checked before any call, cache, one run at a time |
 | `test_storage.py` | 6 | Timestamps come back aware, API emits an offset, activity uses the reader's day, chunk sync |
 | `test_linkedin.py` | 27 | Pasted links kept as one canonical account, others refused in words, nothing saved without Apify; the actor asked only for posts (no reactions or comments) with both caps, later reads only for newer posts; a post stored once, non-post rows never stored, an empty first read an error; the label becomes the account's name; Funding details on Funding only, skipped posts stay pending, budget stops cleanly; 24h spacing, `--skip-paid` reads nothing; API filters, Excel, add/remove, the `linkedin` refresh scope |
+| `test_hardening.py` | 19 | SPA path traversal, security headers, request size caps, connect-time address check, budget reservations, literal LIKE search, http(s)-only feed links, Search web one at a time and robust to repeated answers, cross-process refresh lock, no write lock held while describing, bounded caches |
 | `test_events.py` | 36 | Apify called with both caps and readable errors, Luma rows mapped (diagnostics never stored, global calendars kept to India), a page read by the model once per change, untrusted model output, rescheduled events updated not duplicated, past backfilled once, upcoming/past split, organiser filter, Excel, add/remove pasted sources, the `events` refresh scope |
 
 Two deliberate choices:

@@ -34,6 +34,7 @@ from ..ingest.events import (
 )
 from ..ingest.vc_firms import load_firms
 from ..models import Event, EventRead, utcnow
+from ..schemas import LabelIn, UrlIn
 from .insights import IST, Window
 
 router = APIRouter(prefix="/api/insights", tags=["insights"])
@@ -305,9 +306,9 @@ def events_excel(
 # --- Pasted sources ---------------------------------------------------------------
 
 class AddSourceIn(BaseModel):
-    url: str
-    label: str | None = None
-    firm: str | None = None
+    url: UrlIn
+    label: LabelIn | None = None
+    firm: LabelIn | None = None
 
 
 class AddSourceOut(BaseModel):
