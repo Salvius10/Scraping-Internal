@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import CopyLink from "./CopyLink";
+import Export from "./Export";
 import ExtractPanel from "./ExtractPanel";
 import Insights from "./Insights";
 import Intelligence from "./Intelligence";
@@ -7,7 +8,7 @@ import LinkedIn from "./LinkedIn";
 import RefreshButton from "./RefreshButton";
 import Sidebar from "./Sidebar";
 import {
-  api, categoryColor, categoryTextColor, parseTime, sourceLabel,
+  api, safeHref, categoryColor, categoryTextColor, parseTime, sourceLabel,
   type ActivityDay, type Article, type Bucket, type Category, type Facets,
   type FilterSpec, type Status,
 } from "./api";
@@ -55,12 +56,13 @@ function describeAge(hours: number | null, interval: number): string {
   return `Refreshed ${days} day${days > 1 ? "s" : ""} ago (expected every ${interval}h)`;
 }
 
-type View = "feed" | "intelligence" | "insights" | "linkedin";
+type View = "feed" | "intelligence" | "insights" | "linkedin" | "export";
 
 function viewFromHash(): View {
   if (window.location.hash === "#intelligence") return "intelligence";
   if (window.location.hash === "#insights") return "insights";
   if (window.location.hash === "#linkedin") return "linkedin";
+  if (window.location.hash === "#export") return "export";
   return "feed";
 }
 
@@ -114,6 +116,12 @@ function Masthead({
             onClick={() => onView("linkedin")}
           >
             LinkedIn
+          </button>
+          <button
+            aria-current={view === "export" ? "page" : undefined}
+            onClick={() => onView("export")}
+          >
+            Export
           </button>
         </nav>
       </div>
@@ -269,7 +277,7 @@ function Entry({
         </div>
         <a
           className="entry-headline"
-          href={article.url}
+          href={safeHref(article.url)}
           target="_blank"
           rel="noreferrer noopener"
         >
@@ -584,6 +592,25 @@ export default function App() {
           onRefreshMessage={setUpdateNote}
         />
         <LinkedIn />
+      </div>
+    );
+  }
+
+  if (view === "export") {
+    return (
+      <div className="shell" data-view="export">
+        <a className="skip-link" href="#main">Skip to content</a>
+        <Masthead
+          status={status}
+          activity={activity}
+          activeDay={activeDay}
+          onPickDay={setActiveDay}
+          view={view}
+          onView={showView}
+          onRefreshed={reloadAll}
+          onRefreshMessage={setUpdateNote}
+        />
+        <Export />
       </div>
     );
   }

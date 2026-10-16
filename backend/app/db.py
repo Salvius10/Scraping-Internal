@@ -96,6 +96,20 @@ def session_scope() -> Iterator[Session]:
         s.close()
 
 
+LIKE_ESCAPE = "\\"
+
+
+def like_pattern(text: str) -> str:
+    """A LIKE pattern matching `text` anywhere, with its own % and _ taken literally.
+
+    Use with `column.ilike(like_pattern(q), escape=LIKE_ESCAPE)`. Without the
+    escaping, a reader searching "100%" or "e_commerce" gets wildcard matches.
+    """
+    escaped = (text.replace(LIKE_ESCAPE, LIKE_ESCAPE * 2)
+               .replace("%", LIKE_ESCAPE + "%").replace("_", LIKE_ESCAPE + "_"))
+    return f"%{escaped}%"
+
+
 def get_session() -> Iterator[Session]:
     """FastAPI dependency."""
     s = SessionLocal()

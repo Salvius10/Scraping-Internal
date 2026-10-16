@@ -39,8 +39,24 @@ def sync_chunk(session: Session, article: Article) -> bool:
 
 
 def sync_all_chunks(session: Session) -> int:
-    """Repair every drifted chunk. Free; returns the number rewritten."""
-    return sum(
-        sync_chunk(session, article)
-        for article in session.scalars(select(Article)).all()
-    )
+    """Repair every drifted chunk. Free; returns the number rewritten.
+
+    Runs on every refresh over the whole corpus, so it reads all first chunks
+    in one query rather than one query per article.
+    """
+    first: dict[int, Chunk] = {}
+    for c in session.scalars(
+            select(Chunk).where(Chunk.chunk_index == 0).order_by(Chunk.id)).all():
+        first.setdefault(c.article_id, c)
+    changed = 0
+    for article_id, headline, description in session.execute(
+            select(Article.id, Article.headline, Article.description)).all():
+        body = chunk_body(headline, description)
+        chunk = first.get(article_id)
+        if chunk is None:
+            session.add(Chunk(article_id=article_id, chunk_index=0, text=body))
+            changed += 1
+        elif chunk.text != body:
+            chunk.text = body
+            changed += 1
+    return changed

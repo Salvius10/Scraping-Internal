@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 import re
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta, timezone
@@ -59,6 +60,11 @@ WEB_NOTE = (
 
 _RELATIVE = re.compile(r"\b(ago|hour|hours|minute|minutes|day|days|week|weeks|"
                        r"month|months|yesterday|today)\b", re.I)
+
+
+# One search at a time: two at once would pay Firecrawl and the model twice for
+# the same results, and race to record them.
+_search_lock = threading.Lock()
 
 
 class WebSearchError(RuntimeError):
@@ -170,7 +176,17 @@ def _already_known(company: str, stage: Stage, when: datetime) -> bool:
 
 def search_web(start: date, end: date | None = None) -> WebSearchSummary:
     """Search the web for startup rounds published in [start, end]. Never raises
-    for a partial failure; raises WebSearchError when nothing could be searched."""
+    for a partial failure; raises WebSearchError when nothing could be searched,
+    or when another search is already running."""
+    if not _search_lock.acquire(blocking=False):
+        raise WebSearchError("A web search is already running. Try again when it finishes.")
+    try:
+        return _search_web(start, end)
+    finally:
+        _search_lock.release()
+
+
+def _search_web(start: date, end: date | None) -> WebSearchSummary:
     today = utcnow().astimezone(IST).date()
     end = min(end or today, today)
     if start > end:
@@ -195,6 +211,7 @@ def search_web(start: date, end: date | None = None) -> WebSearchSummary:
         fresh.append((r, when, approx))
 
     batch_seen: set[tuple[str, Stage]] = set()
+    stored: set[str] = set()     # urls recorded by this search (web_rounds.url is unique)
     for offset in range(0, len(fresh), BATCH_SIZE):
         batch = fresh[offset:offset + BATCH_SIZE]
         pending = [_Pending(i, r.title, r.description, None) for i, (r, _, _) in enumerate(batch)]
@@ -217,9 +234,15 @@ def search_web(start: date, end: date | None = None) -> WebSearchSummary:
                 if not isinstance(entry, dict):
                     continue
                 try:
-                    r, when, approx = batch[int(entry.get("i")) - 1]
+                    index = int(entry.get("i")) - 1
+                    if index < 0:
+                        raise IndexError(index)
+                    r, when, approx = batch[index]
                 except (TypeError, ValueError, IndexError):
                     continue
+                if r.url in stored:
+                    continue             # the model answered the same result twice
+                stored.add(r.url)
                 round_label = tidy_round(clean_text(entry.get("round"), 80))
                 stage = coerce_stage(entry.get("stage"), round_label)
                 company = clean_text(entry.get("company"), 200)

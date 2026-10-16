@@ -27,9 +27,11 @@ import time
 from dataclasses import dataclass, field
 from urllib.parse import urljoin, urlparse
 
+import httpcore
 import httpx
 from bs4 import BeautifulSoup
 
+from .cache import TTLCache
 from .config import settings
 from .llm.budget import BudgetExceeded, ensure_budget, estimate_cost
 
@@ -55,8 +57,7 @@ _DROP_TAGS = ("script", "style", "noscript", "svg", "iframe", "canvas",
 _KEEP_ATTRS = {"href", "src", "alt", "title", "datetime"}
 
 _run_lock = threading.Lock()
-_cache: dict[str, tuple[float, "Extraction"]] = {}
-_cache_lock = threading.Lock()
+_cache: TTLCache["Extraction"] = TTLCache(max_entries=128)
 
 
 class ExtractError(ValueError):
@@ -102,11 +103,18 @@ def check_url(url: str) -> str:
     if port not in _ALLOWED_PORTS:
         raise ExtractError("Only standard web ports (80 and 443) are allowed.")
 
-    try:
-        infos = socket.getaddrinfo(parts.hostname, port, type=socket.SOCK_STREAM)
-    except socket.gaierror:
-        raise ExtractError(f"Could not find the site {parts.hostname}.") from None
+    public_addresses(parts.hostname, port)
+    return url
 
+
+def public_addresses(host: str, port: int) -> list[str]:
+    """Resolve `host`, refusing it unless every address is on the public internet."""
+    try:
+        infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    except socket.gaierror:
+        raise ExtractError(f"Could not find the site {host}.") from None
+
+    addresses = []
     for info in infos:
         address = ipaddress.ip_address(info[4][0].split("%")[0])
         # Anything not on the public internet -- loopback, private ranges,
@@ -116,7 +124,40 @@ def check_url(url: str) -> str:
             raise ExtractError(
                 "That address is on a private or local network and cannot be fetched."
             )
-    return url
+        addresses.append(str(address))
+    if not addresses:
+        raise ExtractError(f"Could not find the site {host}.")
+    return addresses
+
+
+class _PublicOnlyBackend(httpcore.SyncBackend):
+    """Connects only to an address checked at the moment of connecting.
+
+    `check_url` resolves the host once, then the HTTP client would resolve it
+    again to connect. A host whose DNS answers a public address the first time
+    and 127.0.0.1 the second ("DNS rebinding") would pass the check and still
+    reach this machine. Resolving here, and connecting to exactly the address
+    that was checked, closes that gap. TLS still verifies against the host
+    name, which httpcore passes separately.
+    """
+
+    def connect_tcp(self, host, port, timeout=None, local_address=None,
+                    socket_options=None):
+        address = public_addresses(host, port)[0]
+        return super().connect_tcp(address, port, timeout=timeout,
+                                   local_address=local_address,
+                                   socket_options=socket_options)
+
+
+def _guarded_transport() -> httpx.HTTPTransport:
+    transport = httpx.HTTPTransport()
+    # httpx has no public hook for the network backend, so the pool it built
+    # is replaced by one using ours; everything else is httpx's default.
+    transport._pool = httpcore.ConnectionPool(
+        ssl_context=httpx.create_ssl_context(),
+        network_backend=_PublicOnlyBackend(),
+    )
+    return transport
 
 
 def fetch_page(url: str) -> tuple[str, str]:
@@ -124,6 +165,7 @@ def fetch_page(url: str) -> tuple[str, str]:
 
     Redirects are followed by hand so every hop is re-validated; letting the
     client follow them would allow a public page to bounce us to localhost.
+    The connection itself is made only to an address checked as it connects.
     """
     current = check_url(url)
     with httpx.Client(
@@ -131,6 +173,7 @@ def fetch_page(url: str) -> tuple[str, str]:
         headers={"User-Agent": settings.user_agent,
                  "Accept": "text/html,application/xhtml+xml;q=0.9,*/*;q=0.5"},
         follow_redirects=False,
+        transport=_guarded_transport(),
     ) as client:
         for _ in range(MAX_REDIRECTS + 1):
             with client.stream("GET", current) as resp:
@@ -246,12 +289,10 @@ def run(url: str, prompt: str) -> Extraction:
         raise ExtractError(f"Keep the request under {MAX_PROMPT_CHARS} characters.")
 
     key = _cache_key(url, prompt)
-    with _cache_lock:
-        hit = _cache.get(key)
-        if hit and hit[0] > time.monotonic():
-            cached = hit[1]
-            return Extraction(**{**cached.__dict__, "cached": True,
-                                 "cost_usd": 0.0, "calls": 0})
+    cached = _cache.get(key)
+    if cached is not None:
+        return Extraction(**{**cached.__dict__, "cached": True,
+                             "cost_usd": 0.0, "calls": 0})
 
     # One at a time: two concurrent extractions are two bills, and a reader
     # double-clicking Extract should not pay twice.
@@ -293,16 +334,14 @@ def run(url: str, prompt: str) -> Extraction:
         if isinstance(value, dict) and value.get("error"):
             result.notes.append(str(value.get("error")))
 
-        with _cache_lock:
-            _cache[key] = (time.monotonic() + CACHE_TTL, result)
+        _cache.set(key, result, CACHE_TTL)
         return result
     finally:
         _run_lock.release()
 
 
 def clear_cache() -> None:
-    with _cache_lock:
-        _cache.clear()
+    _cache.clear()
 
 
 __all__ = ["Extraction", "ExtractError", "BudgetExceeded", "run", "check_url",

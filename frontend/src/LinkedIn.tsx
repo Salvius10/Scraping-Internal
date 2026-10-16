@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
+import AddToExportButton from "./AddToExport";
 import CopyLink from "./CopyLink";
-import DownloadIcon from "./DownloadIcon";
 import RefreshButton from "./RefreshButton";
 import {
-  api, parseTime, type AddLinkedinSourceResponse, type LinkedinKind, type LinkedinKindKey,
+  api, safeHref, parseTime, type AddLinkedinSourceResponse, type LinkedinKind, type LinkedinKindKey,
   type LinkedinPost, type LinkedinResponse, type LinkedinSource,
 } from "./api";
 import { istDay, PRESETS, publishedFmt, readAgo, showDay } from "./dates";
@@ -119,7 +119,7 @@ function AccountNote({
 }) {
   return (
     <p className="vc-firm-note">
-      <a href={source.url} target="_blank" rel="noreferrer noopener">{source.label}</a>
+      <a href={safeHref(source.url)} target="_blank" rel="noreferrer noopener">{source.label}</a>
       {" · "}{source.kind_label}
       <span className={source.last_error ? "vc-error" : undefined}>
         {" · "}{readAgo(source.last_read)}
@@ -269,15 +269,15 @@ export default function LinkedIn() {
               </button>
             )}
             <RefreshButton scope="linkedin" onDone={reload} onMessage={setNote} />
-            <a
-              className="ins-download"
-              href={api.linkedinExcelUrl(query)}
-              download
-              title="Funding posts only: company, stage, round, investors and amount, one sheet per stage, as in the Startup firms export"
-            >
-              <DownloadIcon />
-              Excel: funding{chosen ? ` · ${chosen.label}` : ""}
-            </a>
+            <AddToExportButton
+              selection={{
+                section: "linkedin", source_id: source ?? undefined,
+                start: start || undefined, end: end || undefined,
+              }}
+              label={`Add funding${chosen ? ` · ${chosen.label}` : ""} to Export`}
+              disabled={badRange || noSources}
+              onMessage={setNote}
+            />
           </div>
         </header>
 
@@ -397,7 +397,7 @@ export default function LinkedIn() {
                       <td className="vc-firm">{p.account}<Reposted post={p} /></td>
                     )}
                     <td className="vc-news">
-                      <a href={p.url} target="_blank" rel="noreferrer noopener">{p.headline}</a>
+                      <a href={safeHref(p.url)} target="_blank" rel="noreferrer noopener">{p.headline}</a>
                       {p.company && <span className="vc-company">{p.company}</span>}
                       {source !== null && <Reposted post={p} />}
                       <p className="li-snippet" title={p.snippet}>{p.snippet}</p>

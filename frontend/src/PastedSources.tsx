@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { api, type AddPastedSourceResponse, type PastedSection, type PastedSource } from "./api";
+import { api, safeHref, type AddPastedSourceResponse, type PastedSection, type PastedSource } from "./api";
 import { readAgo } from "./dates";
 
 const COPY: Record<PastedSection, { placeholder: string; note: string; unit: [string, string] }> = {
@@ -144,7 +144,7 @@ export function PastedSourceList({
         {sources.map((s) => (
           <li key={s.id}>
             <p className="vc-firm-note">
-              <a href={s.url} target="_blank" rel="noreferrer noopener">{s.label}</a>
+              <a href={safeHref(s.url)} target="_blank" rel="noreferrer noopener">{s.label}</a>
               {s.firm_label && ` · for ${s.firm_label}`}
               {" · "}from {s.via_label}
               <span className={s.last_error ? "vc-error" : undefined}>

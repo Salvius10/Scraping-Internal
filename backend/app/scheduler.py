@@ -11,10 +11,11 @@ so restarting the server does not reset the clock -- and does not trigger a
 paid run when the feed is already fresh. A feed that is overdue refreshes
 straight away.
 
-Two guards stop overlapping runs, each of which would pay for enrichment
-twice: a lock within the process, and a freshness check at run time that
-skips the job if anything (another process, a manual `--once`) refreshed
-within the interval.
+Three guards stop overlapping runs, each of which would pay for enrichment
+twice: a lock within the process, a lock file shared by every process on the
+same database (`proclock.py`), and a freshness check at run time that skips
+the job if anything (another process, a manual `--once`) refreshed within the
+interval.
 """
 
 from __future__ import annotations
@@ -31,6 +32,7 @@ from sqlalchemy import func, select
 from .config import settings
 from .db import init_db, session_scope
 from .models import IngestRun, utcnow
+from .proclock import ProcessLock, refresh_lock
 
 log = logging.getLogger(__name__)
 
@@ -40,7 +42,36 @@ JOB_ID = "refresh"
 GRACE = timedelta(minutes=10)
 
 _run_lock = threading.Lock()
+_held: ProcessLock | None = None    # the cross-process lock, while a run holds it
 _scheduler = None
+
+
+def _acquire() -> bool:
+    """Take both locks without waiting: this process's, then every process's."""
+    global _held
+    if not _run_lock.acquire(blocking=False):
+        return False
+    lock = refresh_lock()
+    try:
+        got = lock.acquire()
+    except OSError:
+        log.exception("scheduler: could not open %s", lock.path)
+        got = False
+    if not got:
+        _run_lock.release()
+        return False
+    _held = lock
+    return True
+
+
+def _release() -> None:
+    global _held
+    lock, _held = _held, None
+    try:
+        if lock is not None:
+            lock.release()
+    finally:
+        _run_lock.release()
 
 
 def interval() -> timedelta:
@@ -70,7 +101,7 @@ def is_fresh(last: datetime | None, now: datetime | None = None) -> bool:
 
 def refresh_job() -> None:
     """One scheduled refresh. Never raises -- the scheduler must survive it."""
-    if not _run_lock.acquire(blocking=False):
+    if not _acquire():
         log.warning("scheduler: a refresh is already running, skipping")
         return
     try:
@@ -94,7 +125,7 @@ def refresh_job() -> None:
     except Exception:  # noqa: BLE001 - log and wait for the next interval
         log.exception("scheduler: refresh failed")
     finally:
-        _run_lock.release()
+        _release()
 
 
 # --- Manual refresh ------------------------------------------------------------------
@@ -244,7 +275,7 @@ def _run_manual(scope: str) -> None:
         log.exception("manual %s refresh failed", scope)
         error = f"The refresh failed: {type(exc).__name__}: {exc}"[:300]
     finally:
-        _run_lock.release()
+        _release()
         with _manual_guard:
             _manual.running = False
             _manual.finished_at = utcnow()
@@ -262,14 +293,21 @@ def start_manual(scope: str) -> str | None:
         minutes = max(1, round(left.total_seconds() / 60))
         return (f"Refreshed moments ago. Try again in {minutes} "
                 f"{'minute' if minutes == 1 else 'minutes'}.")
-    if not _run_lock.acquire(blocking=False):
+    if not _acquire():
         return "A refresh is already running. It will update this page when done."
     with _manual_guard:
         _manual.scope, _manual.running = scope, True
         _manual.started_at, _manual.finished_at = now, None
         _manual.summary = _manual.error = None
-    threading.Thread(target=_run_manual, args=(scope,), daemon=True,
-                     name=f"manual-{scope}-refresh").start()
+    try:
+        threading.Thread(target=_run_manual, args=(scope,), daemon=True,
+                         name=f"manual-{scope}-refresh").start()
+    except Exception:
+        # No thread means nothing will release the locks; do it here.
+        _release()
+        with _manual_guard:
+            _manual.running = False
+        raise
     log.info("manual %s refresh started", scope)
     return None
 

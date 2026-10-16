@@ -42,7 +42,9 @@ from ..config import settings
 from ..db import init_db, session_scope
 from ..llm.bedrock import LlmUnavailable, invoke_json
 from ..llm.budget import BudgetExceeded
-from ..models import LinkedinKind, LinkedinPost, LinkedinRead, LinkedinSource, utcnow
+from ..models import (
+    ExportSelection, LinkedinKind, LinkedinPost, LinkedinRead, LinkedinSource, utcnow,
+)
 from ..search import apify
 from .rounds import clean_investors, clean_text, tidy_round
 
@@ -129,13 +131,16 @@ def add_source(url: str, label: str | None = None) -> LinkedinSource:
 
 
 def remove_source(source_id: int) -> bool:
-    """Drop an account with every post and read that came from it."""
+    """Drop an account with every post and read that came from it, and its
+    selections on the Export page."""
     with session_scope() as s:
         row = s.get(LinkedinSource, source_id)
         if row is None:
             return False
         s.execute(delete(LinkedinPost).where(LinkedinPost.source_id == source_id))
         s.execute(delete(LinkedinRead).where(LinkedinRead.source_id == source_id))
+        s.execute(delete(ExportSelection).where(ExportSelection.section == "linkedin",
+                                                ExportSelection.source_id == source_id))
         s.delete(row)
     return True
 

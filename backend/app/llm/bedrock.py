@@ -28,7 +28,7 @@ from dataclasses import dataclass
 
 from ..config import settings
 from .budget import (
-    BudgetExceeded, cost_of, ensure_budget, estimate_cost, record_call,
+    BudgetExceeded, cost_of, estimate_cost, record_call, reserve,
 )
 
 log = logging.getLogger(__name__)
@@ -233,8 +233,18 @@ def invoke(
 
     prompt_chars = len(prompt) + len(system or "")
     estimated = estimate_cost(model, prompt_chars, max_tokens)
-    ensure_budget(estimated)  # raises before any money moves
+    # Raises before any money moves, and holds the estimate until the call is
+    # ledgered, so concurrent calls cannot jointly overshoot a cap.
+    with reserve(estimated):
+        return _converse(feature, prompt, system=system, model=model,
+                         max_tokens=max_tokens, temperature=temperature,
+                         reasoning_effort=reasoning_effort)
 
+
+def _converse(feature: str, prompt: str, *, system: str | None, model: str,
+              max_tokens: int, temperature: float,
+              reasoning_effort: str | None) -> LlmResult:
+    """One Converse call, ledgered. Only `invoke` calls this, inside the cap check."""
     if settings.llm_dry_run:
         log.warning("LLM_DRY_RUN is on -- returning a stub for %r", feature)
         record_call(feature, model, 0, 0, ok=True, note="dry run")

@@ -16,16 +16,16 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import threading
-import time
 from datetime import datetime
 from typing import Literal
 
 from fastapi import APIRouter
 from pydantic import BaseModel
 
+from ..cache import TTLCache
 from ..llm.bedrock import LlmUnavailable, invoke
 from ..llm.budget import BudgetExceeded, get_spend
+from ..schemas import TextIn, UrlIn
 from ..search import firecrawl
 
 log = logging.getLogger(__name__)
@@ -44,14 +44,14 @@ SYSTEM_PROMPT = (
     "No preamble, no sign-off."
 )
 
-_summaries: dict[str, tuple[float, tuple[str, str, float]]] = {}
-_summaries_lock = threading.Lock()
+# (summary, model, cost) per page + query.
+_summaries: TTLCache[tuple[str, str, float]] = TTLCache(max_entries=256)
 
 
 # --- Search -----------------------------------------------------------------
 
 class SearchRequest(BaseModel):
-    query: str
+    query: TextIn
     kind: Literal["news", "web"] = "news"
 
 
@@ -94,8 +94,8 @@ def search(request: SearchRequest) -> SearchResponse:
 # --- Scrape + summarise -------------------------------------------------------
 
 class ScrapeRequest(BaseModel):
-    url: str
-    query: str | None = None
+    url: UrlIn
+    query: TextIn | None = None
 
 
 class ScrapeResponse(BaseModel):
@@ -167,9 +167,7 @@ def scrape(request: ScrapeRequest) -> ScrapeResponse:
     response.published_at = page.published_at
 
     key = _summary_key(request.url, request.query)
-    with _summaries_lock:
-        hit = _summaries.get(key)
-        hit = hit[1] if hit and hit[0] > time.monotonic() else None
+    hit = _summaries.get(key)
 
     if hit is not None:
         response.summary, response.model, _ = hit
@@ -187,14 +185,12 @@ def scrape(request: ScrapeRequest) -> ScrapeResponse:
             response.summary = result.text or "No summary came back."
             response.model = result.model
             response.cost_usd = result.cost_usd
-            with _summaries_lock:
-                _summaries[key] = (time.monotonic() + SUMMARY_TTL,
-                                   (response.summary, result.model, result.cost_usd))
+            _summaries.set(key, (response.summary, result.model, result.cost_usd),
+                           SUMMARY_TTL)
 
     response.budget_remaining = round(get_spend().remaining_total, 6)
     return response
 
 
 def clear_cache() -> None:
-    with _summaries_lock:
-        _summaries.clear()
+    _summaries.clear()

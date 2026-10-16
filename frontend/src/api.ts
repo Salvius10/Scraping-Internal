@@ -160,8 +160,47 @@ export interface FundingRound {
   source_label: string;
   headline: string;
   url: string;
-  origin: "feed" | "web" | "pasted";
+  origin: RoundOrigin;
   date_approx: boolean;
+  also_via: RoundOrigin[];       // Export only: sources of duplicates merged into it
+}
+
+/** Where a round was found. "linkedin" appears only on the Export page. */
+export type RoundOrigin = "feed" | "web" | "pasted" | "linkedin";
+
+/** One "Add to Export" click, re-run every time the Export page is read. */
+export interface ExportSelection {
+  id: number;
+  section: "startups" | "linkedin";
+  label: string;                // "Startup firms · Seed"
+  dates: string;                // "13 Sep 2026 to today"
+  rounds: number;               // rows it holds now, before duplicates are removed
+  added_at: string;
+}
+
+export interface ExportResponse {
+  selections: ExportSelection[];
+  rounds: FundingRound[];       // duplicates removed, newest first
+  stages: { key: StageKey; label: string; count: number }[];
+  total: number;
+  duplicates: number;           // rows removed as repeats of one deal
+}
+
+export interface AddToExport extends DateRange {
+  section: "startups" | "linkedin";
+  stage?: StageKey;             // startups: one tab, or every stage when omitted
+  source_id?: number;           // linkedin: one account, or every account when omitted
+}
+
+export interface AddToExportResponse {
+  added: boolean;
+  selection_id: number | null;
+  label: string | null;
+  rounds: number;               // rows the selection holds
+  new: number;                  // of which new to Export
+  duplicates: number;           // of which already in Export, merged away
+  total: number;                // rounds in Export now
+  error: string | null;
 }
 
 export interface SearchWebResponse {
@@ -488,15 +527,6 @@ export const api = {
     post<SearchWebResponse>("/insights/search-web", { start, end: end || undefined }),
   rounds: (stage: StageKey, range: DateRange = {}) =>
     get<RoundsResponse>("/insights/rounds", { stage, ...range }),
-  // A plain link, so the browser handles the file download itself.
-  roundsExcelUrl: (stage?: StageKey, range: DateRange = {}) => {
-    const params = new URLSearchParams();
-    if (stage) params.set("stage", stage);
-    if (range.start) params.set("start", range.start);
-    if (range.end) params.set("end", range.end);
-    const query = params.toString();
-    return `/api/insights/rounds.xlsx${query ? `?${query}` : ""}`;
-  },
   refresh: (scope: RefreshScope) => post<RefreshStart>("/refresh", { scope }),
   refreshStatus: () => get<RefreshStatus>("/refresh"),
   vcs: (query: VcQuery) => get<VcsResponse>("/insights/vcs", { ...query, all: query.all || undefined }),
@@ -534,16 +564,13 @@ export const api = {
   removeSource: (id: number) => del<{ removed: boolean }>(`/insights/sources/${id}`),
   linkedin: (query: LinkedinQuery) =>
     get<LinkedinResponse>("/linkedin", { ...query, all: query.all || undefined }),
-  // Funding posts only, laid out like the Startup firms export: kind and
-  // "show other" do not apply.
-  linkedinExcelUrl: (query: LinkedinQuery) => {
-    const params = new URLSearchParams();
-    if (query.source !== undefined) params.set("source", String(query.source));
-    if (query.start) params.set("start", query.start);
-    if (query.end) params.set("end", query.end);
-    const q = params.toString();
-    return `/api/linkedin.xlsx${q ? `?${q}` : ""}`;
-  },
+  exportList: () => get<ExportResponse>("/export"),
+  addToExport: (selection: AddToExport) =>
+    post<AddToExportResponse>("/export/selections", selection),
+  removeExportSelection: (id: number) => del<{ removed: boolean }>(`/export/selections/${id}`),
+  clearExport: () => del<{ removed: number }>("/export/selections"),
+  // A plain link, so the browser handles the file download itself.
+  exportExcelUrl: "/api/export.xlsx",
   // Paid: read straight away through Apify (~$0.04 for the newest 20 posts),
   // then gpt-oss reads the posts.
   addLinkedinSource: (url: string, label?: string) =>
@@ -621,4 +648,15 @@ const SOURCE_LABELS: Record<string, string> = {
 
 export function sourceLabel(name: string): string {
   return SOURCE_LABELS[name] ?? name;
+}
+
+/** An href for a link that came from another site, or undefined.
+ *
+ * The backend keeps only http(s) links, but these strings started out in
+ * feeds, scraped pages and model output, so a `javascript:` or `data:` link
+ * must never reach an <a> even if one slipped through. Without an href the
+ * anchor renders as plain text.
+ */
+export function safeHref(url: string | null | undefined): string | undefined {
+  return url && /^https?:\/\//i.test(url.trim()) ? url : undefined;
 }

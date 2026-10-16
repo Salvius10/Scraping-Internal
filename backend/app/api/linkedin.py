@@ -35,6 +35,7 @@ from ..ingest.linkedin import (
 )
 from ..ingest.rounds import coerce_stage
 from ..models import LinkedinKind, LinkedinPost, LinkedinRead, Stage, utcnow
+from ..schemas import LabelIn, UrlIn
 from .insights import IST, STAGE_TITLES, RoundOut, Window, rounds_sheet
 
 router = APIRouter(prefix="/api/linkedin", tags=["linkedin"])
@@ -197,8 +198,8 @@ def linkedin(
 # --- Adding and removing ----------------------------------------------------------------
 
 class AddSourceIn(BaseModel):
-    url: str
-    label: str | None = None
+    url: UrlIn
+    label: LabelIn | None = None
 
 
 class AddSourceOut(BaseModel):

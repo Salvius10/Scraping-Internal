@@ -16,14 +16,13 @@ from __future__ import annotations
 
 import hashlib
 import re
-import threading
-import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 import httpx
 
+from ..cache import TTLCache
 from ..config import settings
 
 SEARCH_TTL = 15 * 60
@@ -47,8 +46,7 @@ _STARTUP_WORDS = re.compile(
     re.I,
 )
 
-_cache: dict[str, tuple[float, object]] = {}
-_cache_lock = threading.Lock()
+_cache: TTLCache[object] = TTLCache(max_entries=512)
 
 
 class FirecrawlError(RuntimeError):
@@ -151,6 +149,9 @@ def _post(path: str, body: dict) -> dict:
         payload = resp.json()
     except ValueError:
         payload = {}
+    if not isinstance(payload, dict):
+        # A proxy error page or an API change; treat it as an empty answer.
+        payload = {}
 
     if resp.status_code == 401:
         raise FirecrawlError("Firecrawl rejected the API key. Check FIRECRAWL_API_KEY in .env.")
@@ -165,16 +166,11 @@ def _post(path: str, body: dict) -> dict:
 
 
 def _cached(key: str):
-    with _cache_lock:
-        hit = _cache.get(key)
-        if hit and hit[0] > time.monotonic():
-            return hit[1]
-    return None
+    return _cache.get(key)
 
 
 def _store(key: str, value: object, ttl: int) -> None:
-    with _cache_lock:
-        _cache[key] = (time.monotonic() + ttl, value)
+    _cache.set(key, value, ttl)
 
 
 def _key(*parts: str) -> str:
@@ -336,5 +332,4 @@ def map_site(url: str, limit: int = 500) -> tuple[list[SiteLink], int, bool]:
 
 
 def clear_cache() -> None:
-    with _cache_lock:
-        _cache.clear()
+    _cache.clear()

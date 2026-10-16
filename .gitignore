@@ -11,3 +11,5 @@ scrape_debug.txt
 node_modules/
 dist/
 scripts/discovery_report.json
+*.refresh.lock
+*.tsbuildinfo

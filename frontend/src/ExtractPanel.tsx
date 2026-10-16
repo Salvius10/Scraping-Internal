@@ -1,6 +1,6 @@
 import { useState } from "react";
 import CopyLink from "./CopyLink";
-import { api, type ExtractResponse } from "./api";
+import { api, safeHref, type ExtractResponse } from "./api";
 
 const EXAMPLES = [
   "List every article headline with its link and date",
@@ -80,7 +80,7 @@ function Result({ entry }: { entry: Entry }) {
           <h4>{entry.prompt}</h4>
           <p className="x-meta">
             {entry.final_url ? (
-              <a href={entry.final_url} target="_blank" rel="noreferrer noopener">{host}</a>
+              <a href={safeHref(entry.final_url)} target="_blank" rel="noreferrer noopener">{host}</a>
             ) : host}
             {!entry.error && (
               <>

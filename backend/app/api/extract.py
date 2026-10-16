@@ -16,14 +16,15 @@ from pydantic import BaseModel
 from .. import extract
 from ..llm.bedrock import LlmUnavailable
 from ..llm.budget import BudgetExceeded, get_spend
+from ..schemas import TextIn, UrlIn
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["extract"])
 
 
 class ExtractRequest(BaseModel):
-    url: str
-    prompt: str
+    url: UrlIn
+    prompt: TextIn
 
 
 class ExtractResponse(BaseModel):

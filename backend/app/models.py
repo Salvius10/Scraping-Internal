@@ -9,10 +9,10 @@ Two of these exist purely to keep the project honest:
 from __future__ import annotations
 
 import enum
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from sqlalchemy import (
-    DateTime, Enum, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint,
+    Date, DateTime, Enum, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.types import TypeDecorator
@@ -546,6 +546,30 @@ class LinkedinRead(Base):
     items_new: Mapped[int] = mapped_column(Integer, default=0)
     apify_usd: Mapped[float] = mapped_column(Float, default=0.0)   # estimated
     error: Mapped[str | None] = mapped_column(Text, default=None)
+
+
+class ExportSelection(Base):
+    """One "Add to Export" click on Startup firms or LinkedIn.
+
+    Saved as the filter the reader was looking at, never a copy of the rows:
+    the Export page re-runs every selection each time it opens, so rounds a
+    later refresh brings in appear on their own, and a story later merged or
+    reclassified drops out.
+
+    section "startups": one stage tab (`stage`, a URL key such as "seed"), or
+    every stage when it is None. section "linkedin": one account's Funding
+    posts (`source_id`), or every account's when it is None.
+    """
+
+    __tablename__ = "export_selections"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    section: Mapped[str] = mapped_column(String(20))                # startups | linkedin
+    stage: Mapped[str | None] = mapped_column(String(20), default=None)
+    source_id: Mapped[int | None] = mapped_column(Integer, default=None)
+    start_day: Mapped[date | None] = mapped_column(Date, default=None)   # IST, inclusive
+    end_day: Mapped[date | None] = mapped_column(Date, default=None)
+    added_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
 
 
 class FilterCache(Base):

@@ -16,6 +16,9 @@ so we never discover an overspend after the money is gone.
 from __future__ import annotations
 
 import logging
+import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import timedelta
 
@@ -141,28 +144,61 @@ def estimate_cost(model: str, prompt_chars: int, max_tokens: int) -> float:
     return cost_of(model, est_in, max_tokens)
 
 
+# Estimates of calls that passed the check and have not been recorded yet.
+# The ledger only learns a call's cost once it returns, so without this, many
+# requests checked at the same moment would each see the whole headroom and
+# could together overshoot a cap.
+_in_flight_usd = 0.0
+_in_flight_lock = threading.Lock()
+
+
+def in_flight_usd() -> float:
+    return _in_flight_usd
+
+
 def ensure_budget(estimated_usd: float = 0.0,
                   session: Session | None = None) -> Spend:
-    """Raise BudgetExceeded unless `estimated_usd` fits under both caps."""
+    """Raise BudgetExceeded unless `estimated_usd` fits under both caps,
+    counting what calls already under way may still spend."""
     spend = get_spend(session)
+    pending = _in_flight_usd
+    note = f" (~${pending:.4f} more is committed to calls under way)" if pending else ""
 
-    if spend.remaining_total < estimated_usd:
+    if spend.remaining_total - pending < estimated_usd:
         raise BudgetExceeded(
             f"total budget cap reached: ${spend.total_usd:.4f} of "
             f"${spend.total_cap:.2f} spent, this call needs "
-            f"~${estimated_usd:.4f}",
+            f"~${estimated_usd:.4f}{note}",
             spend,
         )
 
-    if spend.remaining_today < estimated_usd:
+    if spend.remaining_today - pending < estimated_usd:
         raise BudgetExceeded(
             f"daily cap reached: ${spend.last_24h_usd:.4f} of "
             f"${spend.daily_cap:.2f} spent in the last 24h, this call needs "
-            f"~${estimated_usd:.4f}",
+            f"~${estimated_usd:.4f}{note}",
             spend,
         )
 
     return spend
+
+
+@contextmanager
+def reserve(estimated_usd: float) -> Iterator[Spend]:
+    """Check the caps and hold `estimated_usd` until the call is done.
+
+    The check and the hold happen under one lock, so two calls can never both
+    claim the same headroom. Release it only after the call is recorded.
+    """
+    global _in_flight_usd
+    with _in_flight_lock:
+        spend = ensure_budget(estimated_usd)
+        _in_flight_usd += estimated_usd
+    try:
+        yield spend
+    finally:
+        with _in_flight_lock:
+            _in_flight_usd = max(0.0, _in_flight_usd - estimated_usd)
 
 
 def record_call(

@@ -7,9 +7,8 @@ filter and interrogate the feed in plain English.
 This document is the low-level design: what every module does, why it is shaped
 that way, and what the real data forced us to change.
 
-**Current state:** 267 articles ingested (236 by the pipeline, 31 written
-through by live Intelligence queries), 170 tests passing, **$0.018794 of the
-$7.00 budget spent (0.3%)**.
+**Current state (2026-10-15):** 857 articles ingested (715 canonical), 417
+tests passing, **$0.12932 of the $7.00 budget spent (1.8%)**.
 
 ---
 
@@ -227,6 +226,38 @@ Five gaps were left after Phase 7. All are now closed:
   stock, market") ranked other companies' IPOs above Zepto's. Retrieval now
   ranks stories in three tiers: the entity plus a term, then the entity alone,
   then any term.
+
+### Production hardening (2026-10-15)
+
+A review for production found one serious hole and a set of weaker spots.
+Each fix is covered by `tests/test_hardening.py`, and each of those tests
+fails on the code before the fix.
+
+| Weak spot | Fix |
+|---|---|
+| **The SPA route served any file in the repo.** `GET /..%2F..%2F.env` returned `.env` -- Bedrock, Firecrawl and Apify keys -- and `news.db`. `%2F` decodes before routing, and the handler joined the path onto `dist/` unchecked | `main._dist_file()` resolves the path and serves it only if it is still inside `dist/`; anything else gets `index.html`. An unknown `/api/...` GET is now a 404, not the app |
+| **DNS rebinding past the URL guard.** `check_url` resolved the host, then httpx resolved it again to connect; a host answering public then `127.0.0.1` passed | `extract._PublicOnlyBackend` resolves, checks and connects to the same address in one step; TLS still verifies the host name. Environment proxies are not used by this client |
+| **Concurrent model calls could jointly overshoot a cap.** Each checked the headroom before any had been ledgered | `budget.reserve()` checks and holds the estimate under one lock until the call is recorded; `ensure_budget` counts what is held |
+| **Two refreshes in two processes.** The lock was per process; two workers, or the server plus `--once`, both paid | `proclock.refresh_lock()`: an OS file lock beside the database (released by the OS if a process dies), taken by the scheduler, "Refresh now" and the pipeline CLI |
+| **Search web crashed on a repeated answer** (`UNIQUE constraint failed: web_rounds.url`) and read `"i": 0` as the *last* result; two clicks at once paid twice | Repeated and out-of-range numbers are skipped; one search runs at a time |
+| **`describe` held the write lock across every page fetch** and the 2 s pauses, the bug `enrich` had already fixed | Fetch with no transaction open, write each update in its own short one |
+| **Feed links were not checked for scheme** -- the one ingest path that did not | RSS items keep only http(s) links; the frontend's `safeHref()` refuses anything else as a second guard |
+| LIKE search read `%` and `_` as wildcards | `db.like_pattern()` escapes them |
+| In-process caches (Firecrawl, summaries, extractions) never dropped expired entries | `cache.TTLCache`: expires as it goes, bounded in size |
+| Request bodies had no size limit | `UrlIn`/`TextIn`/`LabelIn` in `schemas.py` cap free text at 4,000 characters (labels 500), above every endpoint's own friendlier limit |
+| `sync_all_chunks` ran one query per article on every refresh | Two queries for the whole corpus |
+| Adding an Export selection re-ran every selection twice | Once |
+| No security headers; a 500 could reach the browser as a traceback in dev | `nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer` on every response; unhandled errors logged and answered `{"detail": "Internal server error"}` |
+| Deprecated `@app.on_event` hooks | A `lifespan` handler |
+
+Housekeeping: `.env.example` lists `AWS_BEARER_TOKEN_BEDROCK`, the key the
+project actually authenticates with; `tsconfig.tsbuildinfo` (a build cache)
+is no longer tracked.
+
+Not changed, and worth knowing before exposing the server beyond one machine:
+**there is no authentication.** Anyone who can reach the port can add
+sources, delete them, and trigger paid reads. Bind to `127.0.0.1` (the
+uvicorn default), or put it behind a proxy that authenticates.
 
 ### Post-phase — UI and a timezone bug
 
@@ -711,8 +742,11 @@ ago") are marked approximate and shown as a day only. Cost per click: about
 8-16 Firecrawl credits and ~$0.003; a failed query is reported, not fatal.
 
 Excel columns: Company, Stage, Round, Investors, Amount, Published (IST, a
-real Excel date), Source, Headline, Link (clickable), with a frozen, filterable
-header. The page follows the scheduler through the same shared hook as the
+real Excel date), Source, Found via, Headline, Link (clickable), with a frozen,
+filterable header. The page itself no longer downloads: its "Add \<stage\> to
+Export" and "Add all stages to Export" buttons send the tab or every stage,
+with the dates, to the Export section (`api/export.py`), which downloads this
+layout. The `.xlsx` endpoints stay as API routes. The page follows the scheduler through the same shared hook as the
 feed (`useRefreshSync`), and reloads when new stories land.
 
 #### `api/vcs.py` + `ingest/vc_firms.py` — Insights: VC firms
@@ -953,7 +987,9 @@ via, Headline, Link) and one sheet per stage. Stage comes from the round the
 model read, by the tabs' rule (`coerce_stage`: Pre-Series A is Seed, no round
 is Other rounds), so the file makes no model call. Source is the account
 ("repost of X" when it was), Found via is "LinkedIn". It follows the account
-and dates chosen on the page.
+and dates chosen on the page. On the page the button is now "Add funding to
+Export", which sends the same Funding posts to the Export section instead;
+`/api/linkedin.xlsx` stays as an API route.
 
 Tables: `linkedin_sources`, `linkedin_posts` (unique per account and LinkedIn
 post id, so a re-read never stores or pays the model for a post twice) and
@@ -963,6 +999,51 @@ Not yet run live: how the actor marks a repost, and what it returns for a
 private or missing account, are not documented, so both are handled
 defensively (an author other than the account; any `error`/`message` row).
 Check them on the first real read.
+
+#### `api/export.py` — Export
+
+A section of its own in the navbar: one list of funding rounds from Startup
+firms and LinkedIn, duplicates removed, downloaded as one Excel file. "Add to
+Export" on those pages saves what the reader is looking at as a **selection**
+(`export_selections`): a stage tab or all stages with dates, or one LinkedIn
+account or all with dates (Funding posts only). A selection is a filter, never
+a copy: every one is re-run whenever Export is read, so rounds a later refresh
+brings in appear on their own, and a story later merged or reclassified drops
+out.
+
+```
+GET    /api/export                       merged rounds, newest first; selections
+                                         with what each holds; counts per stage;
+                                         how many duplicates were removed
+GET    /api/export.xlsx                  the Startup firms layout, a sheet per stage
+POST   /api/export/selections {section, stage?, source_id?, start?, end?}
+         -> rounds it holds, how many are new, how many were already in Export
+DELETE /api/export/selections/{id}       take one back
+DELETE /api/export/selections            empty the list
+```
+
+**Duplicates.** The same row reached by two selections counts once. Two rows
+are one deal when they name the same company -- compared in one spelling,
+case, punctuation and a trailing "Pvt Ltd"/"Limited" aside -- at the same
+stage within 14 days (`web_rounds.DUPLICATE_DAYS`, the rule Search web and
+pasted websites already use). Undated rows and rows with no company are never
+merged. The copy kept is the most trusted source's -- news feed, then your
+websites, Search web, LinkedIn -- and a round, amount or investors it lacks is
+filled from the duplicate; Found via names every source ("News feed,
+LinkedIn"). Adding a selection reports how many of its rounds were new and how
+many were merged away.
+
+Checked against a copy of the real database (2026-10-12, $0): all stages of
+Startup firms held 196 rows, 25 of them the same deal from two outlets that
+the feed's own dedupe had kept apart (Nat Habit, Arivihan, Ola Electric's
+rights issue...), leaving 171; one LinkedIn account added 20 with no overlap.
+One merge was wrong: Orange Retail Finance's Rs 100 crore debt and a report
+that it "eyes equity raise", both in Other rounds within 5 days. The labels
+cannot tell them apart -- Bharat Housing Network's real duplicate has the same
+Debt-and-none pair -- so the rule stays.
+
+A removed LinkedIn account takes its selections with it. Reads only: no fetch,
+no model, $0.
 
 #### `api/buckets.py` — buckets, kept in step with the scheduler
 
@@ -1366,7 +1447,7 @@ are recorded under `intelligence_summary`; Firecrawl credits are billed by Firec
 
 ## 8. Testing
 
-**378 tests, all offline — no test spends money.**
+**417 tests, all offline — no test spends money.**
 
 | File | Tests | Covers |
 |---|---|---|
@@ -1380,6 +1461,7 @@ are recorded under `intelligence_summary`; Firecrawl credits are billed by Firec
 | `test_extract.py` | 32 | URL guard (private IPs, metadata endpoint, schemes, ports, redirect-to-localhost), size/type limits, HTML cleaning, result shapes, budget checked before any call, cache, one run at a time |
 | `test_storage.py` | 6 | Timestamps come back aware, API emits an offset, activity uses the reader's day, chunk sync |
 | `test_linkedin.py` | 27 | Pasted links kept as one canonical account, others refused in words, nothing saved without Apify; the actor asked only for posts (no reactions or comments) with both caps, later reads only for newer posts; a post stored once, non-post rows never stored, an empty first read an error; the label becomes the account's name; Funding details on Funding only, skipped posts stay pending, budget stops cleanly; 24h spacing, `--skip-paid` reads nothing; API filters, Excel, add/remove, the `linkedin` refresh scope |
+| `test_hardening.py` | 19 | SPA path traversal, security headers, request size caps, connect-time address check, budget reservations, literal LIKE search, http(s)-only feed links, Search web one at a time and robust to repeated answers, cross-process refresh lock, no write lock held while describing, bounded caches |
 | `test_events.py` | 36 | Apify called with both caps and readable errors, Luma rows mapped (diagnostics never stored, global calendars kept to India), a page read by the model once per change, untrusted model output, rescheduled events updated not duplicated, past backfilled once, upcoming/past split, organiser filter, Excel, add/remove pasted sources, the `events` refresh scope |
 
 Two deliberate choices:

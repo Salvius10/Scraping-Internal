@@ -74,6 +74,7 @@ class RoundOut(BaseModel):
     origin: str = "feed"         # "feed" (our news sites), "web" (Search web), "pasted",
                                  # "linkedin" (the LinkedIn page's export)
     date_approx: bool = False    # time came from "3 days ago", not a stamp
+    also_via: list[str] = []     # Export only: origins of duplicates merged into this row
 
 
 class StageCount(BaseModel):
@@ -247,7 +248,7 @@ FOUND_VIA = {"feed": "News feed", "web": "Web search", "pasted": "Your website",
 
 COLUMNS = [
     ("Company", 28), ("Stage", 12), ("Round", 16), ("Investors", 44),
-    ("Amount", 18), ("Published (IST)", 19), ("Source", 18), ("Found via", 12),
+    ("Amount", 18), ("Published (IST)", 19), ("Source", 18), ("Found via", 20),
     ("Headline", 60), ("Link", 50),
 ]
 
@@ -272,7 +273,8 @@ def rounds_sheet(workbook, title: str, rows: list[RoundOut]) -> None:
         ws.append([
             r.company or "", r.stage, r.round or "", ", ".join(r.investors),
             r.amount or "Undisclosed", published, r.source_label,
-            FOUND_VIA[r.origin], r.headline, r.url,
+            ", ".join(FOUND_VIA[o] for o in dict.fromkeys([r.origin, *r.also_via])),
+            r.headline, r.url,
         ])
         row = ws.max_row
         ws.cell(row=row, column=6).number_format = (
