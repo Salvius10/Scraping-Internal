@@ -1,21 +1,19 @@
-"""The 12-hour refresh.
+"""Scheduler (every 12 hours) and Manual Refresh (on demand from the platform).
 
-Runs `ingest.pipeline.refresh()` every `refresh_hours`, either inside the API
-process (the default: `scheduler_enabled`) or standalone:
+Both start the same `pipeline.run.run_pipeline()`. The schedule runs inside the
+API process (the default: `scheduler_enabled`) or standalone:
 
     python -m app.scheduler            # blocking; runs until interrupted
     python -m app.scheduler --status   # when the next run is due, then exit
 
-The cadence is anchored to the *last recorded refresh*, not to process start,
-so restarting the server does not reset the clock -- and does not trigger a
-paid run when the feed is already fresh. A feed that is overdue refreshes
-straight away.
+The cadence is anchored to the *last recorded run*, not to process start, so
+restarting the server does not reset the clock -- and does not trigger a paid
+run when the data is already fresh. An overdue run starts straight away.
 
-Three guards stop overlapping runs, each of which would pay for enrichment
-twice: a lock within the process, a lock file shared by every process on the
-same database (`proclock.py`), and a freshness check at run time that skips
-the job if anything (another process, a manual `--once`) refreshed within the
-interval.
+Three guards stop overlapping runs, each of which would pay twice: a lock
+within the process, a lock file shared by every process on the same database
+(`proclock.py`), and a freshness check at run time that skips the scheduled
+job if anything (another process, a manual refresh) ran within the interval.
 """
 
 from __future__ import annotations
@@ -31,7 +29,7 @@ from sqlalchemy import func, select
 
 from .config import settings
 from .db import init_db, session_scope
-from .models import IngestRun, utcnow
+from .models import PipelineRun, utcnow
 from .proclock import ProcessLock, refresh_lock
 
 log = logging.getLogger(__name__)
@@ -80,11 +78,11 @@ def interval() -> timedelta:
 
 def last_refresh() -> datetime | None:
     with session_scope() as s:
-        return s.scalar(select(func.max(IngestRun.started_at)))
+        return s.scalar(select(func.max(PipelineRun.started_at)))
 
 
 def next_due(last: datetime | None, now: datetime | None = None) -> datetime:
-    """When the next refresh should run: now if overdue or never run."""
+    """When the next run should start: now if overdue or never run."""
     now = now or utcnow()
     if last is None:
         return now
@@ -92,62 +90,46 @@ def next_due(last: datetime | None, now: datetime | None = None) -> datetime:
 
 
 def is_fresh(last: datetime | None, now: datetime | None = None) -> bool:
-    """True when a refresh ran recently enough that another would be waste."""
+    """True when a run started recently enough that another would be waste."""
     if last is None:
         return False
     now = now or utcnow()
     return now - last < interval() - GRACE
 
 
+def _run(trigger: str):
+    from .pipeline.run import run_pipeline
+    return run_pipeline(trigger)
+
+
 def refresh_job() -> None:
-    """One scheduled refresh. Never raises -- the scheduler must survive it."""
+    """One scheduled run. Never raises -- the scheduler must survive it."""
     if not _acquire():
-        log.warning("scheduler: a refresh is already running, skipping")
+        log.warning("scheduler: a run is already in progress, skipping")
         return
     try:
         if is_fresh(last_refresh()):
-            log.info("scheduler: feed refreshed recently elsewhere, skipping")
+            log.info("scheduler: ran recently elsewhere, skipping")
             return
-        from .ingest.pipeline import refresh
-
-        log.info("scheduler: refresh starting")
-        result = refresh()
-        e = result.enrich
-        log.info(
-            "scheduler: refresh done -- %d sources (%d failed), %d new, "
-            "%s described, %s enriched ($%.6f), %s merged, %s rounds read, "
-            "%s VC posts new",
-            len(result.runs), sum(1 for r in result.runs if r.error),
-            sum(r.items_new for r in result.runs), result.described,
-            getattr(e, "updated", 0), getattr(e, "cost_usd", 0.0), result.merged,
-            getattr(result.rounds, "extracted", 0), getattr(result.vcs, "new", 0),
-        )
+        log.info("scheduler: run starting")
+        run = _run("scheduled")
+        log.info("scheduler: run %s done -- %d fetched, %d new, funding +%d, events +%d, $%.6f%s",
+                 run.id, run.fetched, run.admitted, run.funding_new, run.events_new,
+                 run.llm_usd, f", error: {run.error}" if run.error else "")
     except Exception:  # noqa: BLE001 - log and wait for the next interval
-        log.exception("scheduler: refresh failed")
+        log.exception("scheduler: run failed")
     finally:
         _release()
 
 
 # --- Manual refresh ------------------------------------------------------------------
 #
-# The "Refresh now" buttons. Same lock as the scheduled job, so a manual run and
-# a scheduled one never overlap (and never pay for enrichment twice). Runs in a
-# background thread; the page polls `manual_status()`.
-#
-#   feed    the full refresh: news, funding rounds for Insights, VC firms, pasted
-#           websites, events
-#   vcs     VC firms and websites pasted on that page: free reads, plus
-#           Firecrawl reads that are due
-#   events  events organised only: the sources that are due (all paid)
-#   linkedin  the LinkedIn accounts that are due (all paid, Apify), then the
-#           model reads their new posts
-
-MANUAL_SCOPES = ("feed", "vcs", "events", "linkedin")
-
+# "Refresh now" on the platform. Same lock as the scheduled job, so a manual run
+# and a scheduled one never overlap (and never pay twice). Runs in a background
+# thread; the page polls `manual_status()`.
 
 @dataclass
 class ManualRun:
-    scope: str | None = None
     running: bool = False
     started_at: datetime | None = None
     finished_at: datetime | None = None
@@ -164,115 +146,26 @@ def manual_status() -> ManualRun:
         return ManualRun(**_manual.__dict__)
 
 
-def _last_vc_read() -> datetime | None:
-    from .models import VcRead
-    with session_scope() as s:
-        return s.scalar(select(func.max(VcRead.started_at)))
-
-
-def _last_event_read() -> datetime | None:
-    from .models import EventRead
-    with session_scope() as s:
-        return s.scalar(select(func.max(EventRead.started_at)))
-
-
-def _last_linkedin_read() -> datetime | None:
-    from .models import LinkedinRead
-    with session_scope() as s:
-        return s.scalar(select(func.max(LinkedinRead.started_at)))
-
-
-def _cooldown_left(scope: str, now: datetime) -> timedelta | None:
-    """Time left before this scope may be refreshed by hand again, if any."""
-    last = {"feed": last_refresh, "vcs": _last_vc_read,
-            "events": _last_event_read, "linkedin": _last_linkedin_read}[scope]()
+def _cooldown_left(now: datetime) -> timedelta | None:
+    """Time left before a refresh may be started by hand again, if any."""
+    last = last_refresh()
     wait = timedelta(minutes=settings.manual_refresh_cooldown_minutes)
     if last is not None and now - last < wait:
         return wait - (now - last)
     return None
 
 
-def _describe_feed(result) -> str:
-    new = sum(r.items_new for r in result.runs)
-    failed = [r.source for r in result.runs if r.error]
-    parts = [f"{new} new {'story' if new == 1 else 'stories'}"]
-    rounds = getattr(result.rounds, "extracted", None)
-    if rounds is not None:
-        parts.append(f"{rounds} funding {'round' if rounds == 1 else 'rounds'} read")
-    if result.vcs is not None:
-        parts.append(f"{result.vcs.new} new VC firm posts")
-    pasted = getattr(result, "pasted", None)
-    if pasted is not None and pasted.reads:
-        parts.append(f"{pasted.new} new from the websites you added")
-    if getattr(result, "events", None) is not None:
-        parts.append(f"{result.events.new} new {'event' if result.events.new == 1 else 'events'}")
-    linkedin = getattr(result, "linkedin", None)
-    if linkedin is not None and linkedin.reads:
-        parts.append(f"{linkedin.new} new LinkedIn {'post' if linkedin.new == 1 else 'posts'}")
-    text = "Refreshed: " + ", ".join(parts)
-    if failed:
-        text += f". Could not read {', '.join(failed)}"
-    return text + "."
-
-
-def _describe_vcs(result, pasted=None) -> str:
-    text = (f"Refreshed VC firms: {result.new} new "
-            f"{'post' if result.new == 1 else 'posts'} from {len(result.reads)} reads")
-    if pasted is not None and pasted.reads:
-        text += f", {pasted.new} from the websites you added"
-    if result.skipped:
-        text += (f"; {result.skipped} Firecrawl reads skipped, as they ran in the "
-                 f"last {settings.vc_firecrawl_hours}h")
-    if result.failed:
-        text += f"; {result.failed} failed"
-    return text + "."
-
-
-def _describe_events(result) -> str:
-    if not result.reads:
-        return (f"Events are up to date: every source was read in the last "
-                f"{settings.events_hours}h.")
-    text = (f"Refreshed events: {result.new} new "
-            f"{'event' if result.new == 1 else 'events'} from {len(result.reads)} reads")
-    if result.failed:
-        text += f"; {result.failed} failed"
-    return text + "."
-
-
-def _describe_linkedin(result) -> str:
-    read = result.classify.classified if result.classify else 0
-    if not result.reads:
-        text = (f"LinkedIn is up to date: every account was read in the last "
-                f"{settings.linkedin_hours}h")
-        return text + (f"; {read} waiting posts read." if read else ".")
-    text = (f"Refreshed LinkedIn: {result.new} new "
-            f"{'post' if result.new == 1 else 'posts'} from {len(result.reads)} "
-            f"{'account' if len(result.reads) == 1 else 'accounts'}")
-    if result.skipped:
-        text += f"; {result.skipped} read in the last {settings.linkedin_hours}h, skipped"
-    if result.failed:
-        text += f"; {result.failed} failed"
-    return text + "."
-
-
-def _run_manual(scope: str) -> None:
+def _run_manual() -> None:
     summary = error = None
     try:
-        if scope == "feed":
-            from .ingest.pipeline import refresh
-            summary = _describe_feed(refresh())
-        elif scope == "events":
-            from .ingest.events import refresh_events
-            summary = _describe_events(refresh_events())
-        elif scope == "linkedin":
-            from .ingest.linkedin import refresh_linkedin
-            summary = _describe_linkedin(refresh_linkedin())
+        from .pipeline.run import describe
+        run = _run("manual")
+        if run.error:
+            error = describe(run)
         else:
-            from .ingest.pasted_sources import refresh_pasted
-            from .ingest.vc_firms import refresh_firms
-            summary = _describe_vcs(refresh_firms(), refresh_pasted(section="vcs"))
+            summary = describe(run)
     except Exception as exc:  # noqa: BLE001 - reported on the page, not raised
-        log.exception("manual %s refresh failed", scope)
+        log.exception("manual refresh failed")
         error = f"The refresh failed: {type(exc).__name__}: {exc}"[:300]
     finally:
         _release()
@@ -280,35 +173,31 @@ def _run_manual(scope: str) -> None:
             _manual.running = False
             _manual.finished_at = utcnow()
             _manual.summary, _manual.error = summary, error
-        log.info("manual %s refresh done: %s", scope, error or summary)
+        log.info("manual refresh done: %s", error or summary)
 
 
-def start_manual(scope: str) -> str | None:
+def start_manual() -> str | None:
     """Start a manual refresh in the background. Returns why not, or None."""
-    if scope not in MANUAL_SCOPES:
-        return f"Unknown refresh {scope!r}."
     now = utcnow()
-    left = _cooldown_left(scope, now)
+    left = _cooldown_left(now)
     if left is not None:
         minutes = max(1, round(left.total_seconds() / 60))
         return (f"Refreshed moments ago. Try again in {minutes} "
                 f"{'minute' if minutes == 1 else 'minutes'}.")
     if not _acquire():
-        return "A refresh is already running. It will update this page when done."
+        return "A refresh is already running. This page updates when it is done."
     with _manual_guard:
-        _manual.scope, _manual.running = scope, True
-        _manual.started_at, _manual.finished_at = now, None
+        _manual.running, _manual.started_at, _manual.finished_at = True, now, None
         _manual.summary = _manual.error = None
     try:
-        threading.Thread(target=_run_manual, args=(scope,), daemon=True,
-                         name=f"manual-{scope}-refresh").start()
+        threading.Thread(target=_run_manual, daemon=True, name="manual-refresh").start()
     except Exception:
         # No thread means nothing will release the locks; do it here.
         _release()
         with _manual_guard:
             _manual.running = False
         raise
-    log.info("manual %s refresh started", scope)
+    log.info("manual refresh started")
     return None
 
 
@@ -325,7 +214,7 @@ def _add_job(scheduler) -> None:
         coalesce=True,                 # a machine asleep for a day runs once
         misfire_grace_time=3600,
     )
-    log.info("scheduler: every %dh, next refresh at %s",
+    log.info("scheduler: every %dh, next run at %s",
              settings.refresh_hours, first.isoformat(timespec="minutes"))
 
 
@@ -357,20 +246,18 @@ def next_run_time() -> datetime | None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    logging.basicConfig(
-        level=logging.INFO, format="%(levelname)s %(name)s: %(message)s"
-    )
-    ap = argparse.ArgumentParser(description="Run the 12h news refresh.")
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    ap = argparse.ArgumentParser(description="Run the pipeline every refresh_hours.")
     ap.add_argument("--status", action="store_true",
-                    help="print when the next refresh is due and exit")
+                    help="print when the next run is due and exit")
     args = ap.parse_args(argv)
 
     init_db()
     if args.status:
         last = last_refresh()
-        print("last refresh  %s" % (last.isoformat(timespec="minutes") if last else "never"))
-        print("next due      %s" % next_due(last).isoformat(timespec="minutes"))
-        print("interval      %dh" % settings.refresh_hours)
+        print("last run  %s" % (last.isoformat(timespec="minutes") if last else "never"))
+        print("next due  %s" % next_due(last).isoformat(timespec="minutes"))
+        print("interval  %dh" % settings.refresh_hours)
         return 0
 
     from apscheduler.schedulers.blocking import BlockingScheduler

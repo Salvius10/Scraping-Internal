@@ -1,16 +1,12 @@
-"""Manual refresh: the "Refresh now" buttons on the feed, Insights and LinkedIn pages.
+"""Platform: Manual Refresh -- an on-demand run from the platform.
 
-  POST /api/refresh {"scope": "feed" | "vcs" | "events" | "linkedin"}
-                                        start one in the background
-  GET  /api/refresh                     is one running, and how it went
+  POST /api/refresh      start one in the background
+  GET  /api/refresh      is one running, and how it went
 
-"feed" is the full refresh the scheduler runs (news, funding rounds, VC
-firms, pasted websites, events, LinkedIn); "vcs" reads the VC firms and the
-websites pasted on that page, "events" the event sources that are due,
-"linkedin" the LinkedIn accounts that are due. All share the scheduler's lock, so a
-manual run never overlaps a scheduled one, and a scope refreshed within
-`manual_refresh_cooldown_minutes` is not refreshed again. A refused start is
-an ordinary answer (`started: false` with the reason), not an error.
+The same run the scheduler starts. It shares the scheduler's lock, so a manual
+run never overlaps a scheduled one, and a run started within
+`manual_refresh_cooldown_minutes` is not started again. A refused start is an
+ordinary answer (`started: false` with the reason), not an error.
 """
 
 from __future__ import annotations
@@ -25,12 +21,7 @@ from .. import scheduler
 router = APIRouter(prefix="/api", tags=["refresh"])
 
 
-class RefreshRequest(BaseModel):
-    scope: str = "feed"
-
-
 class RefreshStatus(BaseModel):
-    scope: str | None
     running: bool
     started_at: datetime | None
     finished_at: datetime | None
@@ -54,6 +45,6 @@ def refresh_status() -> RefreshStatus:
 
 
 @router.post("/refresh", response_model=RefreshStart)
-def refresh_now(request: RefreshRequest) -> RefreshStart:
-    reason = scheduler.start_manual(request.scope)
+def refresh_now() -> RefreshStart:
+    reason = scheduler.start_manual()
     return RefreshStart(started=reason is None, reason=reason, status=_status())

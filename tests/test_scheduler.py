@@ -1,7 +1,8 @@
-"""Scheduler tests. Offline: the refresh itself is replaced by a stub.
+"""Scheduler tests. Offline: the run itself is replaced by a stub.
 
-The two properties that matter on a $7 budget: a restart must not trigger a
-paid run when the feed is fresh, and two runs must never overlap.
+The properties that matter on a $7 budget: a restart must not trigger a paid
+run when the data is fresh, two runs must never overlap -- in one process or
+across processes -- and a failing run must not stop the schedule.
 """
 
 from __future__ import annotations
@@ -10,23 +11,23 @@ from datetime import timedelta
 
 from app import scheduler
 from app.config import settings
-from app.models import utcnow
+from app.models import PipelineRun, utcnow
 
 H = timedelta(hours=settings.refresh_hours)
 
 
-def test_never_refreshed_runs_now() -> None:
+def test_never_run_runs_now() -> None:
     now = utcnow()
     assert scheduler.next_due(None, now) == now
 
 
-def test_overdue_feed_runs_now() -> None:
+def test_overdue_runs_now() -> None:
     now = utcnow()
     assert scheduler.next_due(now - H - timedelta(hours=3), now) == now
 
 
-def test_fresh_feed_waits_for_the_interval() -> None:
-    """A server restart two hours after a refresh must not pay for another."""
+def test_fresh_data_waits_for_the_interval() -> None:
+    """A server restart two hours after a run must not pay for another."""
     now = utcnow()
     last = now - timedelta(hours=2)
     assert scheduler.next_due(last, now) == last + H
@@ -39,19 +40,18 @@ def test_freshness_allows_a_slightly_early_fire() -> None:
     assert not scheduler.is_fresh(None, now)
 
 
-def _stub_refresh(monkeypatch, calls: list) -> None:
-    import app.ingest.pipeline as pipeline
+def _stub_run(monkeypatch, calls: list) -> None:
+    def fake_run(trigger):
+        calls.append(trigger)
+        return PipelineRun(id=1, trigger=trigger, fetched=0, admitted=0, funding_new=0,
+                           events_new=0, llm_usd=0.0)
 
-    def fake_refresh(*args, **kwargs):
-        calls.append(1)
-        return pipeline.RefreshResult()
-
-    monkeypatch.setattr(pipeline, "refresh", fake_refresh)
+    monkeypatch.setattr(scheduler, "_run", fake_run)
 
 
-def test_job_skips_when_something_else_just_refreshed(monkeypatch) -> None:
+def test_job_skips_when_something_else_just_ran(monkeypatch) -> None:
     calls: list = []
-    _stub_refresh(monkeypatch, calls)
+    _stub_run(monkeypatch, calls)
     monkeypatch.setattr(scheduler, "last_refresh", lambda: utcnow())
     scheduler.refresh_job()
     assert calls == []
@@ -59,15 +59,15 @@ def test_job_skips_when_something_else_just_refreshed(monkeypatch) -> None:
 
 def test_job_runs_when_stale(monkeypatch) -> None:
     calls: list = []
-    _stub_refresh(monkeypatch, calls)
+    _stub_run(monkeypatch, calls)
     monkeypatch.setattr(scheduler, "last_refresh", lambda: utcnow() - H * 2)
     scheduler.refresh_job()
-    assert calls == [1]
+    assert calls == ["scheduled"]
 
 
 def test_job_never_overlaps(monkeypatch) -> None:
     calls: list = []
-    _stub_refresh(monkeypatch, calls)
+    _stub_run(monkeypatch, calls)
     monkeypatch.setattr(scheduler, "last_refresh", lambda: None)
     assert scheduler._run_lock.acquire(blocking=False)
     try:
@@ -77,13 +77,27 @@ def test_job_never_overlaps(monkeypatch) -> None:
     assert calls == []
 
 
-def test_job_survives_a_failing_refresh(monkeypatch) -> None:
-    import app.ingest.pipeline as pipeline
+def test_another_process_holding_the_lock_blocks_both_kinds_of_run(monkeypatch) -> None:
+    calls: list = []
+    _stub_run(monkeypatch, calls)
+    monkeypatch.setattr(scheduler, "last_refresh", lambda: None)
+    other = scheduler.refresh_lock()          # stands in for another process
+    assert other.acquire()
+    try:
+        scheduler.refresh_job()
+        assert "already running" in scheduler.start_manual()
+    finally:
+        other.release()
+    assert calls == []
+    assert scheduler._run_lock.acquire(blocking=False)   # nothing left held
+    scheduler._run_lock.release()
 
-    def boom(*args, **kwargs):
+
+def test_job_survives_a_failing_run(monkeypatch) -> None:
+    def boom(trigger):
         raise RuntimeError("source exploded")
 
-    monkeypatch.setattr(pipeline, "refresh", boom)
+    monkeypatch.setattr(scheduler, "_run", boom)
     monkeypatch.setattr(scheduler, "last_refresh", lambda: None)
     scheduler.refresh_job()                       # must not raise
     assert scheduler._run_lock.acquire(blocking=False)
@@ -103,5 +117,5 @@ def test_background_scheduler_starts_with_the_job(monkeypatch) -> None:
 
 
 def test_tests_never_start_the_scheduler() -> None:
-    """Starting the app under test must never kick off a real, paid ingest."""
+    """Starting the app under test must never kick off a real, paid run."""
     assert settings.scheduler_enabled is False

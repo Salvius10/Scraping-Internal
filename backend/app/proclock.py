@@ -1,7 +1,7 @@
 """A lock shared by every process using the same database.
 
 The scheduler's thread lock only covers one process. Two API workers, or the
-server plus `python -m app.ingest.pipeline --once`, would each refresh -- and
+server plus `python -m app.pipeline --once`, would each refresh -- and
 pay for enrichment, scraping and Apify reads -- at the same moment. This lock
 lives in a file beside the database, so it covers every process using it.
 

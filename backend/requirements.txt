@@ -7,21 +7,18 @@ pydantic-settings==2.12.0
 # Storage
 SQLAlchemy==2.0.46
 
-# Ingest -- RSS is the free path for 5 of 6 sources
+# Sources -- RSS (free); Apify and Firecrawl are called over plain HTTP
 feedparser==6.0.14
 httpx==0.28.1
-beautifulsoup4==4.14.2       # og:description extraction
-dateparser==1.2.2            # normalises "2 hours ago" on listing pages
-PyYAML==6.0.3                # sources.yaml
+dateparser==1.2.2            # dates as feeds, pages and models write them
+PyYAML==6.0.3                # pipeline/sources.yaml
+tzdata==2026.4               # IANA zones for zoneinfo; Windows ships none
 APScheduler==3.11.0          # 12h refresh
 
-# LLM -- Bedrock only (gpt-oss-120b for bulk, Sonnet 4.6 opt-in)
+# Bedrock -- LLM structuring (gpt-oss-120b) and Guardrails
 boto3==1.43.100
 
-# Paid extraction path -- VCCircle only, the single feedless source
-scrapegraphai==2.2.4
-
-# Insights: funding rounds downloaded as Excel
+# Export to Excel
 openpyxl==3.1.5
 
 # Dev

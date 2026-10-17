@@ -1,0 +1,85 @@
+# Source registry -- the only file to edit to add or drop a source.
+#
+# The orchestrator fans a fetch job out to every source below on each run.
+# `every_hours` spaces out the paid ones: a source read within that many hours
+# is skipped (0 = read on every run). A failed read does not count as a read.
+#
+# Apify bills in its own account: LinkedIn, Luma and Eventbrite together stay
+# under ~$4 a month at these settings, inside Apify's $5 monthly free usage.
+#
+# Requirements this serves:
+#   - newly funded startup accounts       -> funding:
+#   - startup events happening in India   -> events:
+
+funding:
+  # Publisher RSS feeds. Free. Verified 2026-09-23 (scripts/discover_feeds.py).
+  rss:
+    every_hours: 0
+    feeds:
+      - key: indianstartupnews
+        label: Indian Startup News
+        url: https://indianstartupnews.com/rss
+      - key: entrackr
+        label: Entrackr
+        url: https://entrackr.com/rss
+      - key: inc42
+        label: Inc42
+        url: https://inc42.com/feed/
+      - key: yourstory
+        label: YourStory
+        url: https://yourstory.com/feed
+      - key: sujatachronicle
+        label: Sujata Chronicle
+        url: https://sujatachronicle.com/feed.xml
+
+  # LinkedIn profiles and company pages, read through Apify (~$0.002 a post).
+  linkedin:
+    every_hours: 24
+    accounts:
+      - url: https://www.linkedin.com/in/gokul-s0123/
+        label: Gokul Startup Ecosystem Insight
+
+  # Funding news across the web, through Firecrawl (~2 credits per 10 results).
+  web_search:
+    every_hours: 24
+    lookback_days: 2
+    results_per_query: 20
+    queries:
+      - Indian startup raises pre-seed funding round
+      - Indian startup raises seed funding round
+      - Indian startup raises Series A funding
+      - Indian startup raises Series B funding
+
+events:
+  # Luma city discover feeds, through Apify ($0.002125 an event). Luma has
+  # Indian discover pages for these three cities (checked 2026-10-16).
+  # 40 a day is at most ~$2.60 a month.
+  luma:
+    every_hours: 24
+    cities: [bengaluru, mumbai, new-delhi]
+    keyword: startup
+    max_items: 40
+
+  # Eventbrite search, through Apify ($0.00092 an event). Browse URLs pin the
+  # place; a bare city name can resolve to another country. 40 a day is at
+  # most ~$1.15 a month.
+  eventbrite:
+    every_hours: 24
+    keyword: startup
+    max_items: 40
+    locations:
+      - https://www.eventbrite.com/d/india--bangalore/
+      - https://www.eventbrite.com/d/india--mumbai/
+      - https://www.eventbrite.com/d/india--new-delhi/
+      - https://www.eventbrite.com/d/india--hyderabad/
+      - https://www.eventbrite.com/d/india--pune/
+      - https://www.eventbrite.com/d/india--chennai/
+
+  # Any other events listing page, scraped through Firecrawl (1 credit a page)
+  # and read by the LLM. Add one as:
+  #   - key: example-portal
+  #     label: Example Portal
+  #     url: https://example.com/startup-events
+  pages:
+    every_hours: 24
+    portals: []

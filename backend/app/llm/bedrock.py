@@ -1,8 +1,9 @@
-"""The only place in this codebase that talks to a model.
+"""The only place in this codebase that talks to Bedrock.
 
-Every call goes through `invoke()`, which checks the budget before spending and
-ledgers the real token usage afterwards. Nothing else may construct a Bedrock
-client -- that rule is what makes the spend figures trustworthy.
+Every model call goes through `invoke()`, and every guardrail check through
+`apply_guardrail()`; both check the budget before spending and ledger the real
+usage afterwards. Nothing else may construct a Bedrock client -- that rule is
+what makes the spend figures trustworthy.
 
 Two models, chosen deliberately:
   gpt-oss-120b     $0.15 / $0.60 per 1M  -- all bulk mechanical work
@@ -24,6 +25,7 @@ import os
 import re
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from ..config import settings
@@ -339,7 +341,92 @@ def invoke_json(
     return result.json(), result
 
 
+# --- Guardrails ------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class GuardrailResult:
+    action: str                 # "NONE" | "GUARDRAIL_INTERVENED"
+    assessments: list
+    usage: dict
+    cost_usd: float
+
+
+def control_client():
+    """The Bedrock control-plane client, for creating a guardrail. It runs no
+    inference and bills nothing, so it is not metered."""
+    try:
+        return _boto_session().client("bedrock")
+    except Exception as exc:  # noqa: BLE001
+        raise LlmUnavailable(f"could not create Bedrock client: {exc}") from exc
+
+
+def apply_guardrail(
+    feature: str,
+    text: str,
+    *,
+    source: str,
+    estimated_usd: float,
+    cost_of_usage: Callable[[dict], float],
+) -> GuardrailResult:
+    """Screen `text` with the configured Bedrock guardrail, metered and capped.
+
+    `source` is "INPUT" or "OUTPUT", as ApplyGuardrail takes it. Guardrails
+    bill per text unit and policy, not per token, so the caller prices the
+    usage the response reports (`cost_of_usage`) and estimates beforehand.
+
+    Raises:
+        BudgetExceeded: refused before any call; nothing was spent.
+        LlmUnavailable: Bedrock could not be reached, or refused the guardrail.
+    """
+    label = f"guardrail:{settings.guardrail_id}:{settings.guardrail_version}"
+    with reserve(estimated_usd):
+        if settings.llm_dry_run:
+            log.warning("LLM_DRY_RUN is on -- guardrail %r passes everything", feature)
+            record_call(feature, label, 0, 0, ok=True, note="dry run", cost_usd=0.0)
+            return GuardrailResult(action="NONE", assessments=[], usage={}, cost_usd=0.0)
+
+        client = get_client()
+        request = {
+            "guardrailIdentifier": settings.guardrail_id,
+            "guardrailVersion": settings.guardrail_version,
+            "source": source,
+            "content": [{"text": {"text": text}}],
+        }
+        for attempt in range(2):
+            try:
+                response = client.apply_guardrail(**request)
+                break
+            except Exception as exc:  # noqa: BLE001 - boto3 raises botocore types
+                code = getattr(exc, "response", {}).get("Error", {}).get("Code", "")
+                if code in _RETRYABLE and attempt == 0:
+                    time.sleep(1.5)
+                    continue
+                record_call(feature, label, 0, 0, ok=False, cost_usd=0.0,
+                            note=f"{type(exc).__name__}: {exc}"[:500])
+                raise LlmUnavailable(_explain_guardrail(exc)) from exc
+
+        usage = response.get("usage") or {}
+        cost = cost_of_usage(usage)
+        action = str(response.get("action") or "NONE")
+        record_call(feature, label, 0, 0, ok=True, cost_usd=cost, note=action)
+        return GuardrailResult(action=action, assessments=list(response.get("assessments") or []),
+                               usage=usage, cost_usd=cost)
+
+
+def _explain_guardrail(exc: Exception) -> str:
+    code = getattr(exc, "response", {}).get("Error", {}).get("Code", "")
+    where = f"{settings.guardrail_id} version {settings.guardrail_version} in {settings.aws_region}"
+    if code == "ResourceNotFoundException":
+        return f"Bedrock has no guardrail {where}. Check GUARDRAIL_ID and GUARDRAIL_VERSION."
+    if code == "AccessDeniedException":
+        return (f"Bedrock refused guardrail {where}. The credentials need "
+                f"bedrock:ApplyGuardrail on it.")
+    if code == "ValidationException":
+        return f"Bedrock rejected the guardrail request for {where}: {exc}"
+    return _explain(exc, f"guardrail {settings.guardrail_id}")
+
+
 __all__ = [
-    "BudgetExceeded", "LlmResult", "LlmUnavailable",
-    "cost_of", "invoke", "invoke_json", "parse_json",
+    "BudgetExceeded", "GuardrailResult", "LlmResult", "LlmUnavailable",
+    "apply_guardrail", "control_client", "cost_of", "invoke", "invoke_json", "parse_json",
 ]

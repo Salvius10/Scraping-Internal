@@ -1,20 +1,29 @@
-"""ORM models.
+"""ORM models, one per box in the architecture that holds state.
 
-Two of these exist purely to keep the project honest:
-  LlmCall   -- every model call is ledgered, so spend is a queryable fact.
-  IngestRun -- per-source run stats, which is how we detect a listing window
-               overflowing between 12h refreshes and silently dropping stories.
+  SeenItem          the seen-items index (URL + content hash), and the queue of
+                    items waiting for the LLM stages
+  GuardrailVerdict  one Bedrock guardrail answer per stage and text, so no text
+                    is paid for twice
+  BlockedItem       the blocked / rejected log
+  FundedStartup     storage: the funded startups feed
+  StartupEvent      storage: the India startup events feed
+  PipelineRun       one scheduled or manual run, with what each stage did
+  SourceRun         one fetch of one source within a run
+  LlmCall           the spend ledger: every model and guardrail call
+
+Tables from the previous design (articles, funding_rounds, linkedin_posts...)
+are left in the database untouched; nothing here reads or writes them.
 """
 
 from __future__ import annotations
 
 import enum
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 
 from sqlalchemy import (
-    Date, DateTime, Enum, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint,
+    JSON, DateTime, Enum, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint,
 )
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.types import TypeDecorator
 
 
@@ -26,12 +35,9 @@ class UTCDateTime(TypeDecorator):
     """A DateTime that is always timezone-aware UTC on the Python side.
 
     SQLite has no timezone type: it stores the wall-clock digits and drops the
-    offset, so every value read back used to be naive. The API serialised
-    those as "2026-09-23T07:56:38" and browsers parsed them as *local* time --
-    5h30m early in India. Normalising here fixes it for every column, every
-    endpoint and every comparison at once.
-
-    Storage is unchanged (naive UTC digits), so existing rows need no migration.
+    offset, so every value read back used to be naive -- and browsers parsed
+    the API's offset-less times as *local* time, 5h30m early in India.
+    Storage is naive UTC digits; every value read back is aware UTC.
     """
 
     impl = DateTime
@@ -57,30 +63,10 @@ class Base(DeclarativeBase):
     pass
 
 
-class Category(str, enum.Enum):
-    """Fixed taxonomy.
-
-    Deliberately a closed set: letting the model invent labels produces
-    "Funding" / "Funding News" / "Fundraise" as separate categories and
-    silently breaks every filter built on top of them.
-    """
-
-    FUNDING = "Funding"
-    MA = "M&A"
-    IPO = "IPO"
-    PRODUCT_LAUNCH = "Product Launch"
-    POLICY = "Policy/Regulation"
-    HIRING = "Hiring/Layoffs"
-    SHUTDOWN = "Shutdown"
-    PARTNERSHIP = "Partnership"
-    MARKET = "Market/Analysis"
-    OTHER = "Other"
-
-
 class Stage(str, enum.Enum):
-    """The Insights tabs. Anything that is not one of the four named stages --
-    Series C and later, debt, IPO anchor money, undisclosed -- is OTHER, so no
-    funding story is hidden. The exact round name is kept separately."""
+    """Funding stage. Anything that is not one of the four early stages --
+    Series C and later, debt, undisclosed -- is OTHER, so no round is hidden.
+    The exact round name is kept separately."""
 
     PRE_SEED = "Pre-Seed"
     SEED = "Seed"
@@ -89,83 +75,237 @@ class Stage(str, enum.Enum):
     OTHER = "Other"
 
 
-class DescriptionOrigin(str, enum.Enum):
-    META = "meta"            # taken from the page's own og:description
-    FEED = "feed"            # taken from the RSS item
-    GENERATED = "generated"  # written by gpt-oss as a fallback
+class ItemStatus(str, enum.Enum):
+    PENDING = "pending"        # admitted; waiting for Guardrail #2 and the LLM
+    STORED = "stored"          # produced at least one stored row
+    IRRELEVANT = "irrelevant"  # the LLM read it: not a round / not an India startup event
+    BLOCKED = "blocked"        # stopped by Guardrail #2 or #3
+    REJECTED = "rejected"      # nothing usable after max_item_attempts, or failed validation
 
 
-class Article(Base):
-    __tablename__ = "articles"
+class SeenItem(Base):
+    """One item admitted by Dedup Stage 1, and the work queue after it.
 
-    id: Mapped[int] = mapped_column(primary_key=True)
-    url: Mapped[str] = mapped_column(String(1000), unique=True, index=True)
-    url_hash: Mapped[str] = mapped_column(String(40), index=True)
-
-    source: Mapped[str] = mapped_column(String(60), index=True)
-    headline: Mapped[str] = mapped_column(Text)
-    description: Mapped[str | None] = mapped_column(Text, default=None)
-    description_origin: Mapped[DescriptionOrigin | None] = mapped_column(
-        Enum(DescriptionOrigin), default=None
-    )
-    published_at: Mapped[datetime | None] = mapped_column(
-        UTCDateTime(), index=True, default=None
-    )
-
-    # Filled by the batched gpt-oss enrichment pass (Phase 5).
-    company: Mapped[str | None] = mapped_column(String(200), index=True, default=None)
-    category: Mapped[Category | None] = mapped_column(
-        Enum(Category), index=True, default=None
-    )
-    summary: Mapped[str | None] = mapped_column(Text, default=None)
-
-    # Dedupe: story_key groups the same event across sources.
-    story_key: Mapped[str | None] = mapped_column(String(40), index=True, default=None)
-    canonical_id: Mapped[int | None] = mapped_column(
-        ForeignKey("articles.id"), index=True, default=None
-    )
-
-    content_hash: Mapped[str | None] = mapped_column(String(40), default=None)
-    ingested_at: Mapped[datetime] = mapped_column(
-        UTCDateTime(), default=utcnow
-    )
-    enriched_at: Mapped[datetime | None] = mapped_column(
-        UTCDateTime(), default=None
-    )
-
-    chunks: Mapped[list["Chunk"]] = relationship(
-        back_populates="article", cascade="all, delete-orphan"
-    )
-
-    @property
-    def is_canonical(self) -> bool:
-        return self.canonical_id is None
-
-
-Index("ix_articles_feed", Article.published_at.desc(), Article.canonical_id)
-
-
-class Chunk(Base):
-    """Backs FTS5 and, crucially, chunk-level citations.
-
-    Answers cite a chunk id, so every claim resolves to specific stored text
-    rather than a bare link at the bottom of the response.
+    `url_hash` is unique: the same URL is never admitted twice. `content_hash`
+    catches the same text under another URL (syndicated copies). The raw text
+    is kept so a pending item can be retried on a later run without fetching
+    it again.
     """
 
-    __tablename__ = "chunks"
+    __tablename__ = "seen_items"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    article_id: Mapped[int] = mapped_column(
-        ForeignKey("articles.id", ondelete="CASCADE"), index=True
-    )
-    chunk_index: Mapped[int] = mapped_column(Integer, default=0)
+    url_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    content_hash: Mapped[str] = mapped_column(String(64), index=True)
+    url: Mapped[str] = mapped_column(String(1000))
+    kind: Mapped[str] = mapped_column(String(20), index=True)   # funding | event | event_page
+    source_key: Mapped[str] = mapped_column(String(120), index=True)
+    source_type: Mapped[str] = mapped_column(String(20))
+    source_label: Mapped[str] = mapped_column(String(200))
+    title: Mapped[str] = mapped_column(Text)
     text: Mapped[str] = mapped_column(Text)
+    published_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), default=None)
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)
 
-    article: Mapped[Article] = relationship(back_populates="chunks")
+    status: Mapped[ItemStatus] = mapped_column(Enum(ItemStatus), index=True,
+                                               default=ItemStatus.PENDING)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    last_error: Mapped[str | None] = mapped_column(Text, default=None)
+    first_seen_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
+    processed_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), default=None)
+
+
+Index("ix_seen_items_source_published", SeenItem.source_key, SeenItem.published_at)
+
+
+class GuardrailVerdict(Base):
+    """A guardrail's answer for one text at one stage.
+
+    Keyed by a hash of the exact text screened, so an item re-fetched on every
+    run (an RSS feed keeps its last 50 stories) is checked -- and paid for --
+    once. Only definite answers are stored; an error is retried next time.
+    """
+
+    __tablename__ = "guardrail_verdicts"
+    __table_args__ = (UniqueConstraint("stage", "text_hash", name="uq_guardrail_stage_text"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    stage: Mapped[str] = mapped_column(String(10))       # raw | input | output
+    text_hash: Mapped[str] = mapped_column(String(64))
+    allowed: Mapped[bool] = mapped_column()
+    reason: Mapped[str | None] = mapped_column(Text, default=None)
+    checked_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
+
+
+class BlockedItem(Base):
+    """The blocked / rejected log: every item stopped before storage, and why.
+
+    stage: guardrail_raw | guardrail_input | guardrail_output | validation | model
+    """
+
+    __tablename__ = "blocked_items"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    stage: Mapped[str] = mapped_column(String(20), index=True)
+    source_key: Mapped[str] = mapped_column(String(120))
+    url: Mapped[str] = mapped_column(String(1000))
+    title: Mapped[str] = mapped_column(Text)
+    reason: Mapped[str] = mapped_column(Text)
+    seen_item_id: Mapped[int | None] = mapped_column(Integer, default=None)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow, index=True)
+
+
+class FundedStartup(Base):
+    """One funding round, after LLM structuring and Dedup Stage 2.
+
+    `source_url` and `published_at` are the most trusted report of the deal
+    (news feed, then web search, then LinkedIn); `sources` lists every report
+    that was merged into it: [{"url", "source", "type", "published_at"}].
+    """
+
+    __tablename__ = "funded_startups"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    company: Mapped[str] = mapped_column(String(200))
+    company_key: Mapped[str] = mapped_column(String(200), index=True)
+    stage: Mapped[Stage] = mapped_column(Enum(Stage), index=True)
+    round_label: Mapped[str | None] = mapped_column(String(80), default=None)
+    amount: Mapped[str | None] = mapped_column(String(120), default=None)
+    investors: Mapped[list] = mapped_column(JSON, default=list)
+    sector: Mapped[str | None] = mapped_column(String(120), default=None)
+    hq_city: Mapped[str | None] = mapped_column(String(120), default=None)
+    summary: Mapped[str | None] = mapped_column(Text, default=None)
+    headline: Mapped[str] = mapped_column(Text)
+
+    source_url: Mapped[str] = mapped_column(String(1000))
+    source_label: Mapped[str] = mapped_column(String(200))
+    source_type: Mapped[str] = mapped_column(String(20), index=True)
+    published_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), index=True,
+                                                          default=None)
+    sources: Mapped[list] = mapped_column(JSON, default=list)
+
+    first_seen_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
+
+
+class StartupEvent(Base):
+    """One startup event in India, after LLM structuring and Dedup Stage 2.
+
+    Times are UTC; `date_only` marks a day with no time given, stored as
+    midnight IST and shown as a day. `source_url` is where it was found.
+    """
+
+    __tablename__ = "startup_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    title: Mapped[str] = mapped_column(Text)
+    title_key: Mapped[str] = mapped_column(String(300), index=True)
+    starts_at: Mapped[datetime] = mapped_column(UTCDateTime(), index=True)
+    ends_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), default=None)
+    date_only: Mapped[bool] = mapped_column(default=False)
+    city: Mapped[str | None] = mapped_column(String(120), index=True, default=None)
+    venue: Mapped[str | None] = mapped_column(String(300), default=None)
+    online: Mapped[bool | None] = mapped_column(default=None)
+    organiser: Mapped[str | None] = mapped_column(String(300), default=None)
+    category: Mapped[str | None] = mapped_column(String(40), default=None)
+    price: Mapped[str | None] = mapped_column(String(80), default=None)
+    summary: Mapped[str | None] = mapped_column(Text, default=None)
+    url: Mapped[str] = mapped_column(String(1000))
+
+    source_url: Mapped[str] = mapped_column(String(1000))
+    source_label: Mapped[str] = mapped_column(String(200))
+    source_type: Mapped[str] = mapped_column(String(20), index=True)
+    sources: Mapped[list] = mapped_column(JSON, default=list)
+
+    first_seen_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
+
+
+class PipelineRun(Base):
+    """One run of the whole pipeline, scheduled or manual, and its stage counts."""
+
+    __tablename__ = "pipeline_runs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    trigger: Mapped[str] = mapped_column(String(20))        # scheduled | manual | cli
+    started_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow, index=True)
+    finished_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), default=None)
+    fetched: Mapped[int] = mapped_column(Integer, default=0)
+    blocked_raw: Mapped[int] = mapped_column(Integer, default=0)
+    already_seen: Mapped[int] = mapped_column(Integer, default=0)
+    admitted: Mapped[int] = mapped_column(Integer, default=0)
+    blocked_input: Mapped[int] = mapped_column(Integer, default=0)
+    structured: Mapped[int] = mapped_column(Integer, default=0)
+    irrelevant: Mapped[int] = mapped_column(Integer, default=0)
+    blocked_output: Mapped[int] = mapped_column(Integer, default=0)
+    rejected: Mapped[int] = mapped_column(Integer, default=0)
+    funding_new: Mapped[int] = mapped_column(Integer, default=0)
+    funding_merged: Mapped[int] = mapped_column(Integer, default=0)
+    events_new: Mapped[int] = mapped_column(Integer, default=0)
+    events_merged: Mapped[int] = mapped_column(Integer, default=0)
+    events_updated: Mapped[int] = mapped_column(Integer, default=0)
+    pending_left: Mapped[int] = mapped_column(Integer, default=0)
+    llm_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    apify_usd: Mapped[float] = mapped_column(Float, default=0.0)      # estimated
+    firecrawl_credits: Mapped[int] = mapped_column(Integer, default=0)
+    stopped_reason: Mapped[str | None] = mapped_column(Text, default=None)
+    error: Mapped[str | None] = mapped_column(Text, default=None)
+
+
+class SourceRun(Base):
+    """One fetch of one source. `skipped` is set, with no fetch made, when the
+    source was read within its interval; a failed fetch does not count as a read.
+
+    `cursor` is the newest publish time in a read whose every item was dealt
+    with (admitted, already seen, or blocked). LinkedIn asks only for posts
+    newer than it, so an item held by an unreachable guardrail is read again.
+    """
+
+    __tablename__ = "source_runs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey("pipeline_runs.id", ondelete="CASCADE"),
+                                        index=True)
+    source_key: Mapped[str] = mapped_column(String(120), index=True)
+    source_type: Mapped[str] = mapped_column(String(20))
+    started_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow, index=True)
+    finished_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), default=None)
+    skipped: Mapped[str | None] = mapped_column(String(200), default=None)
+    items: Mapped[int] = mapped_column(Integer, default=0)
+    cursor: Mapped[datetime | None] = mapped_column(UTCDateTime(), default=None)
+    apify_usd: Mapped[float] = mapped_column(Float, default=0.0)      # estimated
+    firecrawl_credits: Mapped[int] = mapped_column(Integer, default=0)
+    warning: Mapped[str | None] = mapped_column(Text, default=None)
+    error: Mapped[str | None] = mapped_column(Text, default=None)
+
+
+class UserSource(Base):
+    """A funding source added on the platform's Sources panel.
+
+    Read on every run alongside the sources in sources.yaml, through the same
+    stages. kind:
+      linkedin  `value` is the account in one spelling (linkedin.com/{in|company}/<slug>/)
+      website   `value` is the page as given; `read_url` is what is read --
+                its feed when it has one (`via` "rss", free), else the page
+                itself through Firecrawl (`via` "scrape", 1 credit a read)
+      search    `value` is the phrase, searched in news across the web
+    Removing one stops it being read; what it already found stays.
+    """
+
+    __tablename__ = "user_sources"
+    __table_args__ = (UniqueConstraint("kind", "value", name="uq_user_sources_kind_value"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    kind: Mapped[str] = mapped_column(String(20))
+    value: Mapped[str] = mapped_column(String(1000))
+    label: Mapped[str] = mapped_column(String(200))
+    via: Mapped[str | None] = mapped_column(String(20), default=None)
+    read_url: Mapped[str | None] = mapped_column(String(1000), default=None)
+    added_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
 
 
 class LlmCall(Base):
-    """The spend ledger. Written on every model call, without exception."""
+    """The spend ledger. Written on every model and guardrail call, without exception."""
 
     __tablename__ = "llm_calls"
 
@@ -179,410 +319,3 @@ class LlmCall(Base):
     cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
     ok: Mapped[bool] = mapped_column(default=True)
     note: Mapped[str | None] = mapped_column(Text, default=None)
-
-
-class IngestRun(Base):
-    """Per-source run stats.
-
-    items_new == items_seen means the feed window overflowed between refreshes
-    and we have almost certainly lost stories.
-    """
-
-    __tablename__ = "ingest_runs"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    source: Mapped[str] = mapped_column(String(60), index=True)
-    started_at: Mapped[datetime] = mapped_column(
-        UTCDateTime(), default=utcnow, index=True
-    )
-    finished_at: Mapped[datetime | None] = mapped_column(
-        UTCDateTime(), default=None
-    )
-    strategy: Mapped[str] = mapped_column(String(20), default="rss")
-    items_seen: Mapped[int] = mapped_column(Integer, default=0)
-    items_new: Mapped[int] = mapped_column(Integer, default=0)
-    items_duplicate: Mapped[int] = mapped_column(Integer, default=0)
-    error: Mapped[str | None] = mapped_column(Text, default=None)
-
-    @property
-    def window_overflowed(self) -> bool:
-        return self.items_seen > 0 and self.items_new == self.items_seen
-
-
-class FundingRound(Base):
-    """One funding round, pulled out of a Funding story by gpt-oss.
-
-    One row per canonical story; the publish time, outlet and link come from
-    the article itself. `extracted_at` is set even when a story turns out not to
-    describe a round, so it is never paid for twice.
-    """
-
-    __tablename__ = "funding_rounds"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    article_id: Mapped[int] = mapped_column(
-        ForeignKey("articles.id", ondelete="CASCADE"), unique=True, index=True
-    )
-    company: Mapped[str | None] = mapped_column(String(200), default=None)
-    stage: Mapped[Stage] = mapped_column(Enum(Stage), index=True, default=Stage.OTHER)
-    round_label: Mapped[str | None] = mapped_column(String(80), default=None)
-    amount: Mapped[str | None] = mapped_column(String(120), default=None)
-    investors: Mapped[str | None] = mapped_column(Text, default=None)
-    extracted_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
-
-    article: Mapped[Article] = relationship()
-
-
-class WebRound(Base):
-    """A funding round found by searching the web from Insights ("Search web").
-
-    Kept apart from `articles`, so web finds never enter the news feed. Each
-    row carries its own link, headline and publish time. `date_approx` is set
-    when the time came from a phrase like "3 days ago" rather than a stamp.
-
-    Every result the model reads gets a row, shown or not: `kept` is False for
-    results that were not a startup round in the four stages, or repeated a
-    round already known. That is what stops a second search paying to read
-    the same result again.
-    """
-
-    __tablename__ = "web_rounds"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    url: Mapped[str] = mapped_column(String(1000), unique=True, index=True)
-    headline: Mapped[str] = mapped_column(Text)
-    domain: Mapped[str] = mapped_column(String(200))
-    snippet: Mapped[str | None] = mapped_column(Text, default=None)
-    published_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), index=True,
-                                                          default=None)
-    date_approx: Mapped[bool] = mapped_column(default=False)
-    company: Mapped[str | None] = mapped_column(String(200), default=None)
-    stage: Mapped[Stage] = mapped_column(Enum(Stage), index=True)
-    round_label: Mapped[str | None] = mapped_column(String(80), default=None)
-    amount: Mapped[str | None] = mapped_column(String(120), default=None)
-    investors: Mapped[str | None] = mapped_column(Text, default=None)
-    kept: Mapped[bool] = mapped_column(default=True, index=True)
-    found_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
-
-
-class VcKind(str, enum.Enum):
-    """What a VC firm's post is about. Only OTHER is hidden by default."""
-
-    INVESTMENT = "Investment"      # the firm invested in, led or joined a round
-    PORTFOLIO = "Portfolio news"   # a backed company's IPO, exit, milestone
-    FUND = "Fund news"             # the firm raised or launched a fund/programme
-    OTHER = "Other"                # essays, podcasts, events, hiring, unrelated
-
-
-class VcPost(Base):
-    """One post read for a VC firm: from its own site, or a news search.
-
-    Written when first seen; `classified_at` is set once gpt-oss has read the
-    title, so no post is paid for twice. The same link can belong to two
-    firms (a co-led round), hence uniqueness on (firm, url).
-    """
-
-    __tablename__ = "vc_posts"
-    __table_args__ = (UniqueConstraint("firm", "url", name="uq_vc_posts_firm_url"),)
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    firm: Mapped[str] = mapped_column(String(60), index=True)
-    url: Mapped[str] = mapped_column(String(1000))
-    title: Mapped[str] = mapped_column(Text)
-    snippet: Mapped[str | None] = mapped_column(Text, default=None)
-    published_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), index=True,
-                                                          default=None)
-    date_approx: Mapped[bool] = mapped_column(default=False)
-    # rss | html | sitemap | scrape | map | search, or "added" for a pasted source
-    via: Mapped[str] = mapped_column(String(20))
-    found_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
-
-    # Filled by the batched gpt-oss pass.
-    classified_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), default=None)
-    kind: Mapped[VcKind | None] = mapped_column(Enum(VcKind), index=True, default=None)
-    headline: Mapped[str | None] = mapped_column(Text, default=None)
-    company: Mapped[str | None] = mapped_column(String(200), default=None)
-    round_label: Mapped[str | None] = mapped_column(String(80), default=None)
-    amount: Mapped[str | None] = mapped_column(String(120), default=None)
-
-
-class VcRead(Base):
-    """One read of one firm. Shows health on the page, and spaces out the
-    Firecrawl reads, which cost credits."""
-
-    __tablename__ = "vc_reads"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    firm: Mapped[str] = mapped_column(String(60), index=True)
-    via: Mapped[str] = mapped_column(String(20))
-    started_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow,
-                                                 index=True)
-    items_seen: Mapped[int] = mapped_column(Integer, default=0)
-    items_new: Mapped[int] = mapped_column(Integer, default=0)
-    credits_used: Mapped[int] = mapped_column(Integer, default=0)
-    error: Mapped[str | None] = mapped_column(Text, default=None)
-
-
-class PastedSource(Base):
-    """A website the reader pasted on Insights > Startup firms or VC firms.
-
-    Each section keeps its own: a "startups" source yields funding rounds for
-    the stage tabs (`PastedRound`), a "vcs" source yields posts sorted like a
-    firm's own news (`VcPost` rows with firm "pasted-<id>"). `via` is how it is
-    read, cheapest that works when it was added: "rss" (its feed, or one the
-    page links to), "html" (post links on the page, plain HTTP) or "scrape"
-    (Firecrawl). `read_url` is what is fetched -- the feed when one was found.
-    `firm` ties a VC source to a tracked firm, so its posts show under it.
-    """
-
-    __tablename__ = "pasted_sources"
-    __table_args__ = (UniqueConstraint("section", "url", name="uq_pasted_sources_section_url"),)
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    section: Mapped[str] = mapped_column(String(20), index=True)   # startups | vcs
-    url: Mapped[str] = mapped_column(String(1000))
-    read_url: Mapped[str] = mapped_column(String(1000))
-    via: Mapped[str] = mapped_column(String(20))
-    label: Mapped[str] = mapped_column(String(200))
-    firm: Mapped[str | None] = mapped_column(String(60), default=None)
-    added_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
-
-
-class PastedSourceRead(Base):
-    """One read of one pasted source: health on the page, and the spacing of
-    Firecrawl reads, which cost credits."""
-
-    __tablename__ = "pasted_source_reads"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    source_id: Mapped[int] = mapped_column(Integer, index=True)
-    started_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow,
-                                                 index=True)
-    items_seen: Mapped[int] = mapped_column(Integer, default=0)
-    items_new: Mapped[int] = mapped_column(Integer, default=0)
-    credits_used: Mapped[int] = mapped_column(Integer, default=0)
-    error: Mapped[str | None] = mapped_column(Text, default=None)
-
-
-class PastedRound(Base):
-    """A post from a pasted Startup firms source, and the round in it.
-
-    Written when first seen; gpt-oss then reads it once (`extracted_at`). Like
-    `WebRound`, every post read gets a row: `kept` is False for posts that do
-    not announce a raise, or repeat a round already known, so none is paid for
-    twice and only rounds reach the tabs.
-    """
-
-    __tablename__ = "pasted_rounds"
-    __table_args__ = (UniqueConstraint("source_id", "url", name="uq_pasted_rounds_source_url"),)
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    source_id: Mapped[int] = mapped_column(Integer, index=True)
-    url: Mapped[str] = mapped_column(String(1000))
-    headline: Mapped[str] = mapped_column(Text)
-    snippet: Mapped[str | None] = mapped_column(Text, default=None)
-    published_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), index=True,
-                                                          default=None)
-    date_approx: Mapped[bool] = mapped_column(default=False)
-    found_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
-
-    # Filled by the batched gpt-oss pass.
-    extracted_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), default=None)
-    company: Mapped[str | None] = mapped_column(String(200), default=None)
-    stage: Mapped[Stage | None] = mapped_column(Enum(Stage), index=True, default=None)
-    round_label: Mapped[str | None] = mapped_column(String(80), default=None)
-    amount: Mapped[str | None] = mapped_column(String(120), default=None)
-    investors: Mapped[str | None] = mapped_column(Text, default=None)
-    kept: Mapped[bool] = mapped_column(default=False, index=True)
-
-
-class EventSource(Base):
-    """A website the reader pasted on Insights > Events organised.
-
-    The VC firms' own Luma calendars live in `vc_firms.yaml`; these are the
-    extra sources added from the page. `via` is "luma" for a Luma calendar
-    (read through Apify) and "page" for any other page (read through
-    Firecrawl, then gpt-oss lists the events on it).
-    """
-
-    __tablename__ = "event_sources"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    url: Mapped[str] = mapped_column(String(1000), unique=True)
-    label: Mapped[str] = mapped_column(String(200))
-    firm: Mapped[str | None] = mapped_column(String(60), default=None)
-    via: Mapped[str] = mapped_column(String(20))
-    added_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
-
-
-class Event(Base):
-    """One event, from a firm's Luma calendar or a pasted website.
-
-    `uid` identifies the event within its source, so a re-read updates the
-    row (events get rescheduled) instead of adding a second one. Upcoming or
-    past is worked out at read time from the dates, never stored.
-    """
-
-    __tablename__ = "events"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    uid: Mapped[str] = mapped_column(String(40), unique=True, index=True)
-    source_key: Mapped[str] = mapped_column(String(120), index=True)
-    firm: Mapped[str | None] = mapped_column(String(60), index=True, default=None)
-    url: Mapped[str] = mapped_column(String(1000))
-    title: Mapped[str] = mapped_column(Text)
-    starts_at: Mapped[datetime] = mapped_column(UTCDateTime(), index=True)
-    ends_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), default=None)
-    date_only: Mapped[bool] = mapped_column(default=False)   # no time was given
-    timezone: Mapped[str | None] = mapped_column(String(60), default=None)
-    venue: Mapped[str | None] = mapped_column(String(300), default=None)
-    city: Mapped[str | None] = mapped_column(String(120), default=None)
-    country: Mapped[str | None] = mapped_column(String(80), default=None)
-    online: Mapped[bool | None] = mapped_column(default=None)
-    host: Mapped[str | None] = mapped_column(String(300), default=None)
-    description: Mapped[str | None] = mapped_column(Text, default=None)
-    via: Mapped[str] = mapped_column(String(20))       # apify | firecrawl
-    found_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
-    updated_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
-
-
-class EventRead(Base):
-    """One read of one event source. Shows health on the page, spaces out the
-    paid reads, and records what each one cost.
-
-    kind: "upcoming" / "past" for a Luma calendar, "page" for a website.
-    `content_hash` is the page text read last time, so an unchanged page is
-    not paid for again with a model call.
-    """
-
-    __tablename__ = "event_reads"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    source_key: Mapped[str] = mapped_column(String(120), index=True)
-    kind: Mapped[str] = mapped_column(String(20))
-    started_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow,
-                                                 index=True)
-    items_seen: Mapped[int] = mapped_column(Integer, default=0)
-    items_new: Mapped[int] = mapped_column(Integer, default=0)
-    apify_usd: Mapped[float] = mapped_column(Float, default=0.0)   # estimated
-    credits_used: Mapped[int] = mapped_column(Integer, default=0)  # Firecrawl
-    llm_usd: Mapped[float] = mapped_column(Float, default=0.0)
-    content_hash: Mapped[str | None] = mapped_column(String(40), default=None)
-    error: Mapped[str | None] = mapped_column(Text, default=None)
-
-
-class LinkedinKind(str, enum.Enum):
-    """What a LinkedIn post is about. Only OTHER is hidden by default."""
-
-    FUNDING = "Funding"    # a company raised money, or the account invested in a round
-    NEWS = "News"          # a launch, partnership, acquisition, hire, fund, milestone
-    OTHER = "Other"        # opinion, hiring ads, events, greetings, anything else
-
-
-class LinkedinSource(Base):
-    """A LinkedIn profile or company page the reader added on the LinkedIn page.
-
-    `url` is the page in one canonical spelling,
-    https://www.linkedin.com/{in|company}/<slug>/, so the same account cannot
-    be added twice. `label_auto` is set while the label is only the slug from
-    the link; the first read replaces it with the account's own name.
-    """
-
-    __tablename__ = "linkedin_sources"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    url: Mapped[str] = mapped_column(String(300), unique=True)
-    kind: Mapped[str] = mapped_column(String(20))                  # profile | company
-    label: Mapped[str] = mapped_column(String(200))
-    label_auto: Mapped[bool] = mapped_column(default=False)
-    added_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
-
-
-class LinkedinPost(Base):
-    """One post read from a LinkedIn account, through Apify.
-
-    Written when first seen; gpt-oss then reads it once (`classified_at`), so
-    no post is paid for twice. `post_id` is LinkedIn's own activity id, unique
-    within an account; `author` differs from the account for a repost.
-    """
-
-    __tablename__ = "linkedin_posts"
-    __table_args__ = (UniqueConstraint("source_id", "post_id",
-                                       name="uq_linkedin_posts_source_post"),)
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    source_id: Mapped[int] = mapped_column(Integer, index=True)
-    post_id: Mapped[str] = mapped_column(String(80))
-    url: Mapped[str] = mapped_column(String(1000))
-    content: Mapped[str] = mapped_column(Text)
-    author: Mapped[str | None] = mapped_column(String(200), default=None)
-    repost: Mapped[bool] = mapped_column(default=False)
-    posted_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), index=True,
-                                                       default=None)
-    found_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
-
-    # Filled by the batched gpt-oss pass.
-    classified_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), default=None)
-    kind: Mapped[LinkedinKind | None] = mapped_column(Enum(LinkedinKind), index=True,
-                                                      default=None)
-    headline: Mapped[str | None] = mapped_column(Text, default=None)
-    company: Mapped[str | None] = mapped_column(String(200), default=None)
-    round_label: Mapped[str | None] = mapped_column(String(80), default=None)
-    amount: Mapped[str | None] = mapped_column(String(120), default=None)
-    investors: Mapped[str | None] = mapped_column(Text, default=None)
-
-
-class LinkedinRead(Base):
-    """One read of one LinkedIn account: health on the page, the spacing of
-    reads (each is paid in Apify), and what each one cost."""
-
-    __tablename__ = "linkedin_reads"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    source_id: Mapped[int] = mapped_column(Integer, index=True)
-    started_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow,
-                                                 index=True)
-    items_seen: Mapped[int] = mapped_column(Integer, default=0)
-    items_new: Mapped[int] = mapped_column(Integer, default=0)
-    apify_usd: Mapped[float] = mapped_column(Float, default=0.0)   # estimated
-    error: Mapped[str | None] = mapped_column(Text, default=None)
-
-
-class ExportSelection(Base):
-    """One "Add to Export" click on Startup firms or LinkedIn.
-
-    Saved as the filter the reader was looking at, never a copy of the rows:
-    the Export page re-runs every selection each time it opens, so rounds a
-    later refresh brings in appear on their own, and a story later merged or
-    reclassified drops out.
-
-    section "startups": one stage tab (`stage`, a URL key such as "seed"), or
-    every stage when it is None. section "linkedin": one account's Funding
-    posts (`source_id`), or every account's when it is None.
-    """
-
-    __tablename__ = "export_selections"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    section: Mapped[str] = mapped_column(String(20))                # startups | linkedin
-    stage: Mapped[str | None] = mapped_column(String(20), default=None)
-    source_id: Mapped[int | None] = mapped_column(Integer, default=None)
-    start_day: Mapped[date | None] = mapped_column(Date, default=None)   # IST, inclusive
-    end_day: Mapped[date | None] = mapped_column(Date, default=None)
-    added_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
-
-
-class FilterCache(Base):
-    """Natural-language filter phrase -> compiled JSON filter.
-
-    The same phrase is never sent to a model twice.
-    """
-
-    __tablename__ = "filter_cache"
-
-    phrase_hash: Mapped[str] = mapped_column(String(40), primary_key=True)
-    phrase: Mapped[str] = mapped_column(Text)
-    filter_json: Mapped[str] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(
-        UTCDateTime(), default=utcnow
-    )

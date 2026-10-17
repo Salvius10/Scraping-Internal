@@ -19,10 +19,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import scheduler
-from .api import (
-    buckets, chat, events, export, extract, feed, filter as filter_api, insights,
-    intelligence, linkedin, pasted, refresh, status, vcs,
-)
+from .api import blocked, events, export, funding, refresh, sources, status
 from .config import BACKEND_DIR, settings
 from .db import init_db
 
@@ -33,8 +30,10 @@ log = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     init_db()
-    log.info("ready: db=%s region=%s cheap=%s",
-             settings.db_path.name, settings.aws_region, settings.model_cheap)
+    from .pipeline import guardrails
+    log.info("ready: db=%s region=%s model=%s guardrails=%s",
+             settings.db_path.name, settings.aws_region, settings.model_cheap,
+             guardrails.state())
     # The 12h refresh. Off in tests, and when ingest runs in its own process.
     if settings.scheduler_enabled:
         scheduler.start()
@@ -46,8 +45,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(
     title="GPS - Ganit Pursuit OS",
-    version="0.1.0",
-    description="Aggregated startup news with natural-language filtering.",
+    version="0.2.0",
+    description="Newly funded Indian startups and startup events in India.",
     lifespan=lifespan,
 )
 
@@ -60,20 +59,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(feed.router)
-app.include_router(buckets.router)
-app.include_router(insights.router)
-app.include_router(vcs.router)
+app.include_router(funding.router)
 app.include_router(events.router)
-app.include_router(pasted.router)
-app.include_router(linkedin.router)
 app.include_router(export.router)
 app.include_router(status.router)
 app.include_router(refresh.router)
-app.include_router(filter_api.router)
-app.include_router(chat.router)
-app.include_router(intelligence.router)
-app.include_router(extract.router)
+app.include_router(blocked.router)
+app.include_router(sources.router)
 
 # Headers every response carries. The pages show text and links taken from
 # other sites, so the browser is told not to sniff types, not to be framed,

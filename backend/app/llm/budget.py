@@ -1,8 +1,8 @@
 """Spend ledger and cap enforcement.
 
 This module exists because $7 is a hard ceiling with no top-up. Every model
-call is metered here and refused here; nothing in the codebase is allowed to
-reach Bedrock without passing through `ensure_budget` and `record_call`.
+and guardrail call is metered here and refused here; nothing in the codebase
+is allowed to reach Bedrock without passing through `reserve` and `record_call`.
 
 Two limits:
   total   -- the whole budget, the real ceiling
@@ -209,13 +209,17 @@ def record_call(
     ok: bool = True,
     note: str | None = None,
     session: Session | None = None,
+    cost_usd: float | None = None,
 ) -> float:
     """Write one ledger row. Returns the cost of the call.
 
     Failed calls are recorded too -- a provider error can still bill for the
     input tokens, and an unrecorded failure hides a retry loop.
+
+    `cost_usd` is for calls not billed by the token (Bedrock Guardrails bill
+    per text unit); when given it is recorded as is.
     """
-    cost = cost_of(model, tokens_in, tokens_out)
+    cost = cost_of(model, tokens_in, tokens_out) if cost_usd is None else cost_usd
     row = LlmCall(
         feature=feature,
         model=model,
