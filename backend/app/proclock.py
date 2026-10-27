@@ -60,3 +60,8 @@ class ProcessLock:
 def refresh_lock() -> ProcessLock:
     """The lock every refresh takes: the scheduled one, "Refresh now", and the CLI."""
     return ProcessLock(settings.db_path.with_name(settings.db_path.name + ".refresh.lock"))
+
+
+def enrichment_lock() -> ProcessLock:
+    """The lock an enrichment job holds while it spends SignalHire credits."""
+    return ProcessLock(settings.db_path.with_name(settings.db_path.name + ".enrichment.lock"))

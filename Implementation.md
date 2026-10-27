@@ -222,6 +222,52 @@ Each item's rows and its final status (`stored`, `irrelevant`, `blocked`,
 `guardrail_output`, `validation`, `model`), source, URL, title, reason. Logged
 once per stage, URL and title. Read with `GET /api/blocked?stage=`.
 
+### 3.9 Enrichment — `enrichment/`, `search/signalhire.py`, `api/enrichment.py`
+
+Not part of the scheduled run: started from the page. **Send data for
+enrichment** on Funded startups takes the feed's filters, so exactly the
+companies in view are sent; the **Enrichment** section shows each company's
+leaders — Co-founder, CEO, CTO, COO, VP Engineering, Head of Engineering, Head
+of Product — with name, company, email, phone and LinkedIn, and exports them.
+
+```
+  Send (POST /api/enrichment) ─▶ enrichment_companies (the queue; one row per company)
+                                         │ claimed queued → working, one job at a time
+                                         ▼                        (proclock.enrichment_lock)
+  1 SignalHire search: company phrase + title query, location India     free: daily quota
+  2 roles.pick_leaders: the person's newest job AT THIS COMPANY holds a
+    wanted designation; the company is the same one, not a same-named one
+  3 reuse anyone looked up before; look up the rest, ≤ 6 per company    credits
+    (Person API with withoutWaterfall: answered in the response, no callback URL)
+  4 store leaders + the company's outcome in one transaction (enriched_contacts)
+```
+
+- **Why step 2 exists.** SignalHire matches the title and company queries
+  against *any* of a person's jobs. Seen live for "Zepto": a project associate
+  who co-founded a construction firm, an "Executive Assistant to the CEO", and
+  "Zepto Digital Labs". Titles that name a role without holding it (assistant
+  to, office of, chief of staff, ex-) are refused; company names are compared
+  after legal and generic words ("Pvt Ltd", "Technologies", "AI") are dropped.
+- **Same name, two companies.** Seen live for "Karta AI": SignalHire calls both
+  `getkarta.ai` and `linkedin.com/company/kartashop` "Karta". The search cannot
+  tell them apart; the lookup returns each person's company page and website.
+  When one company's leaders span several pages, those not at the page that
+  matches the name (`roles.page_score`) are marked `maybe_other` — shown and
+  exported as "Maybe another company", never deleted. A tie marks no one.
+- **Cost.** The preview states the most a send can cost (companies × 6) and the
+  credits left before anything is spent. A company enriched before is not sent
+  again; a person looked up successfully is never paid for twice. Credits used
+  are counted as people found with contacts (seen live: 5 found, one with no
+  contacts, the balance fell by 4) — not from the balance, which a shared
+  account moves on its own. The balance is read afresh when a job ends: a
+  lookup's `X-Credits-Left` was seen to predate its own charge.
+- **Failures.** Key rejected, credits or the daily search quota used up, a
+  rate limit that outlasts three waits, SignalHire unreachable: the job stops,
+  the company goes back in the queue, and the page offers **Resume**. Anything
+  else fails that company only (retry with **Retry failed**). Credits running
+  out mid-company keep the people already looked up and resume with the rest.
+  A restart never resumes a job on its own — every job costs credits.
+
 ---
 
 ## 4. Platform
@@ -235,6 +281,12 @@ once per stage, URL and title. Read with `GET /api/blocked?stage=`.
 | `POST /api/refresh`, `GET /api/refresh` | Manual Refresh |
 | `GET /api/blocked` | the blocked / rejected log |
 | `GET /api/sources?section=funding\|events`, `POST /api/sources`, `DELETE /api/sources/{id}` | the Sources panel: list with health, add, remove |
+| `GET /api/enrichment/preview?<funding filters>`, `POST /api/enrichment?<funding filters>` | what sending the companies in view would cost; send them |
+| `GET /api/enrichment?designation=&q=` | the leaders found, with a count per designation |
+| `GET /api/enrichment/status`, `GET /api/enrichment/companies` | the job and the queue; every company sent and how it went |
+| `POST /api/enrichment/resume`, `POST /api/enrichment/retry` | work the companies waiting; queue the failed ones again |
+| `DELETE /api/enrichment` | Clear list: every company and its leaders leave the list (refused while a job runs). What was paid for stays hidden, so sending a company again costs nothing for people already found |
+| `GET /api/export/enrichment.xlsx?designation=&q=` | the leaders as Excel, LinkedIn as a link; below them, in grey, every company sent with no leader in the file and why (no leaders found, failed, waiting, no CTO found…), so the file accounts for every company |
 
 Dates are IST days, inclusive. An event is upcoming until it ends; one with
 no end until its start; a day-only event until that day is over.
@@ -246,8 +298,10 @@ opens.
 
 **Frontend** (`frontend/src`): two feeds (Funded startups, Events in India)
 with stage / when tabs, date, source and city filters, search, Export to
-Excel, Refresh now, a Sources panel on Funded startups, and a health line
-(guardrails, budget, failing sources).
+Excel, Refresh now, a Sources panel and Send data for enrichment on Funded
+startups, an Enrichment section (designation tabs, search, progress, Resume /
+Retry failed, Clear list, Export to Excel), and a health line (guardrails,
+budget, failing sources).
 It follows scheduled runs by polling `/api/status` once a minute.
 
 Hardening carried over: the SPA route never serves a file outside `dist/`;
@@ -274,7 +328,16 @@ startup_events     title, starts_at, ends_at, date_only, city, venue, online, or
 user_sources       sources added on the page: kind, value, label, how a website is read
 pipeline_runs      one row per run, with every stage's counts and spend
 source_runs        one row per source per run: items, cursor, cost, warning, error
+enrichment_companies  company_key (unique), funding details, status (queued | working |
+                   done | no_match | failed), note, people_found, credits_used,
+                   cleared_at (set by Clear list: off the list, kept for reuse)
+enriched_contacts  company_id + SignalHire uid (unique), name, designation, title, email,
+                   phone, linkedin, other emails/phones, company page + site,
+                   maybe_other, lookup (SignalHire's answer)
 ```
+
+`init_db()` also adds any column listed in `db._ADDED_COLUMNS` that an older
+copy of a table lacks — the enrichment tables gained columns after first use.
 
 ---
 
@@ -289,6 +352,7 @@ source_runs        one row per source per run: items, cursor, cost, warning, err
 | Luma | ≤ 40 events/day ≈ $2.60/month |
 | Eventbrite | ≤ 40 events/day ≈ $1.15/month |
 | Web search | 4 queries × 20 results ≈ 8–16 Firecrawl credits a day |
+| Enrichment (SignalHire) | search free (daily quota); a credit per person found with contacts, ≤ 6 per company, only on a send |
 
 **First run on an empty index** reads every source in full: ~164 RSS items,
 up to 80 web results, 20 LinkedIn posts, up to 80 events — about 15–20
@@ -305,7 +369,7 @@ cd frontend; npm install; npm run build; cd ..
 ```
 
 Copy `.env.example` to `.env`: `AWS_BEARER_TOKEN_BEDROCK`, `APIFY_API_TOKEN`,
-`FIRECRAWL_API_KEY`.
+`FIRECRAWL_API_KEY`, `SIGNALHIRE_API_KEY`.
 
 ```powershell
 Push-Location backend
@@ -324,8 +388,9 @@ Pop-Location
 
 ## 8. Testing
 
-`pytest tests` — **136 tests, all offline**: Bedrock, Apify and Firecrawl are
-stubbed, and a test that forgets to stub Bedrock fails instead of calling AWS.
+`pytest tests` — **225 tests, all offline**: Bedrock, Apify, Firecrawl and
+SignalHire are stubbed, and a test that forgets to stub Bedrock or SignalHire
+fails instead of calling it.
 
 | File | Covers |
 |---|---|
@@ -336,6 +401,7 @@ stubbed, and a test that forgets to stub Bedrock fails instead of calling AWS.
 | `test_user_sources.py` | the network guard (private addresses, rebinding), feed-or-page detection, add/refuse/cap/remove, added sources in the run, rounds read off a page, the API |
 | `test_api.py` | feeds and counts, upcoming/past split, Excel content and formula safety, status, refresh, log |
 | `test_scheduler.py`, `test_hardening.py`, `test_budget.py` | scheduling and locks, static serving, headers, budget rails, caches |
+| `test_enrichment.py` | designations held vs only named; same company vs same-named; best email/phone/LinkedIn; the client's requests, waits and worded failures; sent once, paid once; stop vs company errors; credits running out mid-company; same-name marking; the API and Excel |
 
 Checked live on 2026-10-16 at $0: the five RSS feeds (164 items) through
 Guardrail #1 (off), Dedup Stage 1 and the index; a second run found all 164
@@ -347,6 +413,11 @@ feed and a free run read 20 items from it; Inc42 Buzz resolved to its own
 feed; VCCircle (no feed) fell to Firecrawl; `127.0.0.1` and the cloud metadata
 address were refused.
 
+Checked live on 2026-10-27 (4 SignalHire credits): searches for Zepto and
+Karta (free) shaped the leader rules; Karta AI enriched end to end — 5 leaders,
+4 with an email or phone, 3 of them at kartashop and marked; the preview, the
+Enrichment section and its Excel export read back the same rows.
+
 ---
 
 ## 9. Known gaps
@@ -356,4 +427,5 @@ address were refused.
 | Paid paths not yet run live | The Eventbrite actor's output was read from its documentation; check the first real run's `source_runs` and `blocked_items`. |
 | Guardrails off | Built and tested; switch on with the setup command when there is budget. |
 | Event title dedupe is exact | The same event named differently on two portals stays two rows (errs toward showing both). |
+| Enrichment pays before it can tell same-named companies apart | The company page that settles it comes with the paid lookup; mismatches are marked, not avoided. Lookups skip SignalHire's waterfall (no callback URL here), so contact coverage is SignalHire's own data only. |
 | No authentication | See §4. |

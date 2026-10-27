@@ -20,10 +20,12 @@ from ..config import settings
 from ..db import get_session
 from ..llm.budget import get_spend
 from ..models import (
-    BlockedItem, FundedStartup, ItemStatus, PipelineRun, SeenItem, SourceRun, StartupEvent,
-    utcnow,
+    BlockedItem, EnrichedContact, FundedStartup, ItemStatus, PipelineRun, SeenItem, SourceRun,
+    StartupEvent, utcnow,
 )
 from ..pipeline import guardrails
+from .enrichment import ContactFilter
+from .enrichment import query as enriched
 from .events import _upcoming
 from .sources import SourceHealth, all_health
 
@@ -65,6 +67,7 @@ class StatusOut(BaseModel):
     guardrails_on: bool
     funding_count: int
     upcoming_events: int
+    enriched_contacts: int
     pending: int
     blocked: int
     registry_error: str | None
@@ -98,6 +101,9 @@ def status(session: Session = Depends(get_session)) -> StatusOut:
         funding_count=session.scalar(select(func.count(FundedStartup.id))) or 0,
         upcoming_events=session.scalar(select(func.count(StartupEvent.id))
                                        .where(_upcoming(now))) or 0,
+        # The leaders on the Enrichment list: a cleared company's are not counted.
+        enriched_contacts=session.scalar(enriched(ContactFilter(),
+                                                  func.count(EnrichedContact.id))) or 0,
         pending=session.scalar(select(func.count(SeenItem.id)).where(
             SeenItem.status == ItemStatus.PENDING)) or 0,
         blocked=session.scalar(select(func.count(BlockedItem.id))) or 0,

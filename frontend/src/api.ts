@@ -102,6 +102,113 @@ export interface EventsPage {
   past: number;
 }
 
+export type DesignationKey =
+  | "cofounder" | "ceo" | "cto" | "coo" | "vp-engineering" | "head-engineering" | "head-product";
+
+export interface ContactRow {
+  id: number;
+  full_name: string;
+  designation: string;          // "Co-founder, CEO"
+  title: string | null;         // as written on the profile
+  company: string;
+  company_id: number;
+  email: string | null;
+  phone: string | null;
+  linkedin: string | null;
+  other_emails: string[];
+  other_phones: string[];
+  location: string | null;
+  company_page: string | null;  // LinkedIn page of the company they work at
+  company_site: string | null;
+  maybe_other: boolean;         // may be at another company with the same name
+  stage: string | null;
+  sector: string | null;
+  hq_city: string | null;
+  lookup: string;               // SignalHire's answer: "success", "failed", ...
+  looked_up_at: string;
+}
+
+export interface ContactsPage {
+  rows: ContactRow[];
+  total: number;
+  all_designations: number;     // the same search, every designation
+  limit: number;
+  offset: number;
+  designations: { key: DesignationKey; label: string; count: number }[];
+}
+
+export interface EnrichmentStatus {
+  ready: boolean;
+  running: boolean;
+  started_at: string | null;
+  finished_at: string | null;
+  current: string | null;
+  companies: number;
+  waiting: number;
+  done: number;
+  no_match: number;
+  failed: number;
+  contacts: number;
+  reachable: number;
+  credits_used: number;
+  credits_left: number | null;
+  per_company: number;
+  message: string | null;
+  error: string | null;
+}
+
+export type CompanyStatus = "queued" | "working" | "done" | "no_match" | "failed";
+
+export interface EnrichedCompany {
+  id: number;
+  company: string;
+  stage: string | null;
+  amount: string | null;
+  sector: string | null;
+  hq_city: string | null;
+  status: CompanyStatus;
+  note: string | null;
+  people_found: number;
+  credits_used: number;
+  requested_at: string;
+  enriched_at: string | null;
+}
+
+export interface EnrichmentPreview {
+  ready: boolean;
+  companies: number;
+  new: number;
+  waiting: number;
+  enriched: number;
+  over_cap: number;
+  max_credits: number;
+  per_company: number;
+  credits_left: number | null;
+}
+
+export interface EnrichmentSend {
+  sent: boolean;
+  message: string;
+  queued: number;
+  waiting: number;
+  enriched: number;
+  over_cap: number;
+  status: EnrichmentStatus;
+}
+
+export interface EnrichmentRun {
+  started: boolean;
+  message: string;
+  status: EnrichmentStatus;
+}
+
+export interface EnrichmentClear {
+  cleared: boolean;             // false while a job runs
+  companies: number;
+  message: string;
+  status: EnrichmentStatus;
+}
+
 export interface SourceHealth {
   key: string;
   label: string;
@@ -129,6 +236,7 @@ export interface Status {
   guardrails_on: boolean;
   funding_count: number;
   upcoming_events: number;
+  enriched_contacts: number;
   pending: number;
   blocked: number;
   registry_error: string | null;
@@ -166,6 +274,11 @@ export interface EventsQuery {
   city?: string;
   start?: string;
   end?: string;
+  q?: string;
+}
+
+export interface ContactsQuery {
+  designation?: DesignationKey;
   q?: string;
 }
 
@@ -215,7 +328,30 @@ export const api = {
     request<{ removed: boolean }>(`/api/sources/${id}`, { method: "DELETE" }),
   fundingExcel: (f: FundingQuery) => `/api/export/funding.xlsx${query({ ...f })}`,
   eventsExcel: (f: EventsQuery) => `/api/export/events.xlsx${query({ ...f })}`,
+  enrichmentPreview: (f: FundingQuery) =>
+    request<EnrichmentPreview>(`/api/enrichment/preview${query({ ...f })}`),
+  enrich: (f: FundingQuery) =>
+    request<EnrichmentSend>(`/api/enrichment${query({ ...f })}`, { method: "POST" }),
+  enrichment: (f: ContactsQuery, limit = 200) =>
+    request<ContactsPage>(`/api/enrichment${query({ ...f, limit })}`),
+  enrichmentStatus: () => request<EnrichmentStatus>("/api/enrichment/status"),
+  enrichmentCompanies: () => request<EnrichedCompany[]>("/api/enrichment/companies"),
+  resumeEnrichment: () => request<EnrichmentRun>("/api/enrichment/resume", { method: "POST" }),
+  retryEnrichment: () => request<EnrichmentRun>("/api/enrichment/retry", { method: "POST" }),
+  clearEnrichment: () => request<EnrichmentClear>("/api/enrichment", { method: "DELETE" }),
+  enrichmentExcel: (f: ContactsQuery) => `/api/export/enrichment.xlsx${query({ ...f })}`,
 };
+
+/** A mailto: link for a plausible address, else nothing. */
+export function mailHref(email: string | null | undefined): string | undefined {
+  return email && /^[^\s@<>"]+@[^\s@<>"]+\.[^\s@<>"]+$/.test(email) ? `mailto:${email}` : undefined;
+}
+
+/** A tel: link with the number's digits (and a leading +), else nothing. */
+export function telHref(phone: string | null | undefined): string | undefined {
+  const digits = (phone ?? "").replace(/[^\d+]/g, "").replace(/(?!^)\+/g, "");
+  return digits.replace("+", "").length >= 6 ? `tel:${digits}` : undefined;
+}
 
 /** The API sends UTC. Times without an offset are read as UTC, not local. */
 export function parseTime(iso: string): Date {

@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import {
-  api, safeHref, type FundingPage, type FundingQuery, type SourceType, type StageKey,
+  api, safeHref, type EnrichmentPreview, type FundingPage, type FundingQuery, type SourceType,
+  type StageKey,
 } from "./api";
 import { DateInputs, ExportLink, SearchBox, Skeleton, Sources } from "./controls";
 import { istDay, PAST_PRESETS, published, showDay } from "./dates";
+import EnrichPanel from "./EnrichPanel";
 import SourcesPanel from "./SourcesPanel";
 
 const SOURCES: { key: SourceType | ""; label: string }[] = [
@@ -15,7 +17,10 @@ const SOURCES: { key: SourceType | ""; label: string }[] = [
 ];
 
 /** Funded startups feed: every round, newest first, from every funding source. */
-export default function Funding({ reloadKey }: { reloadKey: number }) {
+export default function Funding({ reloadKey, onEnrichment }: {
+  reloadKey: number;
+  onEnrichment: (message: string | null) => void;   // show the Enrichment section
+}) {
   const [stage, setStage] = useState<StageKey | "">("");
   const [source, setSource] = useState<SourceType | "">("");
   const [start, setStart] = useState(istDay(29));
@@ -25,6 +30,9 @@ export default function Funding({ reloadKey }: { reloadKey: number }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showSources, setShowSources] = useState(false);
+  const [enrich, setEnrich] = useState<EnrichmentPreview | null>(null);
+  const [enrichBusy, setEnrichBusy] = useState(false);
+  const [enrichError, setEnrichError] = useState<string | null>(null);
 
   const badRange = Boolean(start && end && start > end);
   const filters: FundingQuery = {
@@ -48,6 +56,25 @@ export default function Funding({ reloadKey }: { reloadKey: number }) {
   useEffect(() => {
     if (!badRange) void load(JSON.parse(key) as FundingQuery);
   }, [key, badRange, load, reloadKey]);
+
+  // The confirmation counts the companies in view; other filters, other companies.
+  useEffect(() => {
+    setEnrich(null);
+    setEnrichError(null);
+  }, [key]);
+
+  const openEnrich = async () => {
+    if (enrichBusy) return;
+    setEnrichBusy(true);
+    setEnrichError(null);
+    try {
+      setEnrich(await api.enrichmentPreview(filters));
+    } catch (e) {
+      setEnrichError(e instanceof Error ? e.message : "Could not reach the server.");
+    } finally {
+      setEnrichBusy(false);
+    }
+  };
 
   const preset = (days: number | null) => {
     setStart(days === null ? "" : istDay(days - 1));
@@ -76,11 +103,24 @@ export default function Funding({ reloadKey }: { reloadKey: number }) {
                   aria-controls="sources-title" onClick={() => setShowSources(!showSources)}>
             {showSources ? "Hide sources" : "Sources"}
           </button>
+          <button className="btn btn--secondary" aria-expanded={enrich !== null}
+                  aria-controls="enrich-title" aria-busy={enrichBusy}
+                  disabled={badRange || !data?.total || enrichBusy}
+                  title="Find the leaders of the companies in this view, with their email, phone and LinkedIn, through SignalHire"
+                  onClick={() => (enrich ? setEnrich(null) : void openEnrich())}>
+            {enrichBusy ? "Counting companies" : "Send data for enrichment"}
+          </button>
           <ExportLink href={api.fundingExcel(filters)} disabled={badRange || !data?.total} />
         </div>
       </header>
 
       {showSources && <SourcesPanel onClose={() => setShowSources(false)} />}
+      {enrichError && <p className="error">{enrichError}</p>}
+      {enrich && (
+        <EnrichPanel preview={enrich} filters={filters} onClose={() => setEnrich(null)}
+                     onSent={(message) => onEnrichment(message)}
+                     onOpen={() => onEnrichment(null)} />
+      )}
 
       <div className="filters">
         <div className="presets" role="group" aria-label="Published">

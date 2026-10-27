@@ -10,6 +10,8 @@
   PipelineRun       one scheduled or manual run, with what each stage did
   SourceRun         one fetch of one source within a run
   LlmCall           the spend ledger: every model and guardrail call
+  EnrichmentCompany a funded startup sent for contact enrichment, and the queue
+  EnrichedContact   one of its leaders, with the contacts SignalHire has
 
 Tables from the previous design (articles, funding_rounds, linkedin_posts...)
 are left in the database untouched; nothing here reads or writes them.
@@ -302,6 +304,86 @@ class UserSource(Base):
     via: Mapped[str | None] = mapped_column(String(20), default=None)
     read_url: Mapped[str | None] = mapped_column(String(1000), default=None)
     added_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
+
+
+class EnrichStatus(str, enum.Enum):
+    QUEUED = "queued"          # waiting for the enrichment job
+    WORKING = "working"        # claimed by a job; back to queued if that job died
+    DONE = "done"              # searched; at least one leader found
+    NO_MATCH = "no_match"      # searched; nobody with a wanted designation there
+    FAILED = "failed"          # the search or lookup failed (`note` says why)
+
+
+class EnrichmentCompany(Base):
+    """A funded startup sent for contact enrichment, and the work queue after it.
+
+    One row per company (`company_key`, as the funding feed spells it), however
+    many rounds it raised: a company sent twice is enriched once. The funding
+    details are copied so the Enrichment section and its export stand alone.
+
+    "Clear list" sets `cleared_at`: the company and its leaders leave the list,
+    but what was paid for stays, so sending the company again costs nothing for
+    the people already looked up.
+    """
+
+    __tablename__ = "enrichment_companies"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    company: Mapped[str] = mapped_column(String(200))
+    company_key: Mapped[str] = mapped_column(String(200), unique=True)
+    funding_id: Mapped[int | None] = mapped_column(Integer, default=None)
+    stage: Mapped[str | None] = mapped_column(String(20), default=None)
+    amount: Mapped[str | None] = mapped_column(String(120), default=None)
+    sector: Mapped[str | None] = mapped_column(String(120), default=None)
+    hq_city: Mapped[str | None] = mapped_column(String(120), default=None)
+
+    status: Mapped[EnrichStatus] = mapped_column(Enum(EnrichStatus), index=True,
+                                                 default=EnrichStatus.QUEUED)
+    note: Mapped[str | None] = mapped_column(Text, default=None)
+    people_found: Mapped[int] = mapped_column(Integer, default=0)
+    credits_used: Mapped[int] = mapped_column(Integer, default=0)
+    requested_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
+    claimed_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), default=None)
+    enriched_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), default=None)
+    cleared_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), default=None)
+
+
+class EnrichedContact(Base):
+    """One leader of an enriched company and the contacts SignalHire has for them.
+
+    `designation` lists the wanted roles their title at the company holds, in a
+    fixed order ("Co-founder, CEO"); `rank` orders leaders within the company,
+    founders first. `title` is the title as written. `lookup` is SignalHire's
+    answer for the person; only a "success" is reused instead of paid for again.
+
+    `company_page` and `company_site` are the LinkedIn page and website of the
+    company the person works at, as SignalHire has them. Two companies can share
+    a name ("Karta" the voice AI and "Karta" the shop); `maybe_other` marks a
+    person whose company page is not the one that matches the name.
+    """
+
+    __tablename__ = "enriched_contacts"
+    __table_args__ = (UniqueConstraint("company_id", "uid", name="uq_enriched_company_uid"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("enrichment_companies.id", ondelete="CASCADE"), index=True)
+    uid: Mapped[str] = mapped_column(String(64), index=True)
+    full_name: Mapped[str] = mapped_column(String(200))
+    designation: Mapped[str] = mapped_column(String(200))
+    rank: Mapped[int] = mapped_column(Integer, default=0)
+    title: Mapped[str | None] = mapped_column(String(300), default=None)
+    email: Mapped[str | None] = mapped_column(String(320), default=None)
+    phone: Mapped[str | None] = mapped_column(String(64), default=None)
+    linkedin: Mapped[str | None] = mapped_column(String(1000), default=None)
+    other_emails: Mapped[list] = mapped_column(JSON, default=list)
+    other_phones: Mapped[list] = mapped_column(JSON, default=list)
+    location: Mapped[str | None] = mapped_column(String(200), default=None)
+    company_page: Mapped[str | None] = mapped_column(String(1000), default=None)
+    company_site: Mapped[str | None] = mapped_column(String(1000), default=None)
+    maybe_other: Mapped[bool] = mapped_column(default=False)
+    lookup: Mapped[str] = mapped_column(String(30))
+    looked_up_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=utcnow)
 
 
 class LlmCall(Base):

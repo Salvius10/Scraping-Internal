@@ -109,6 +109,26 @@ class Settings(BaseSettings):
     eventbrite_price_per_event: float = 0.00092
     eventbrite_price_per_run: float = 0.0005
 
+    # --- SignalHire (Enrichment: contacts of the funded startups' leaders) ---
+    # Billed in SignalHire credits, separate from the $7 LLM cap. A people
+    # search is free (it draws on a daily quota); each person whose contacts
+    # are looked up costs credits. Lookups run without SignalHire's waterfall,
+    # so results come back in the response and no public callback URL is needed.
+    signalhire_api_key: str | None = None
+    signalhire_api_url: str = "https://www.signalhire.com/api/v1"
+    signalhire_timeout: float = 60.0
+    # Where the leaders are searched: a country, state or city SignalHire
+    # knows. Empty searches everywhere, at the cost of more same-named companies.
+    signalhire_location: str = "India"
+    signalhire_search_size: int = 30      # profiles read per company search (1-100)
+    # The credit cap: at most this many people per company are looked up,
+    # founders and the C-suite first.
+    signalhire_contacts_per_company: int = 6
+    signalhire_max_companies: int = 100   # companies one "Send data for enrichment" queues
+    # Waits, in seconds, before retrying a request SignalHire rate-limited
+    # (a trial account may look up only 5 people a minute).
+    signalhire_retry_waits: tuple[float, ...] = (10.0, 30.0, 60.0)
+
     # --- HTTP ---
     user_agent: str = (
         "IndiaStartupNewsBot/0.1 (+aggregator; contact: melvinsalvius.26csb@licet.ac.in)"

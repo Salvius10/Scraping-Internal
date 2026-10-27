@@ -22,6 +22,7 @@
   --accent-ink: #b34700;       /* #fe6e06 as text fails AA; this passes */
   --accent-fill: #c64e00;      /* white text on it passes AA (4.6:1) */
   --accent-fill-hover: #b84a00;
+  --accent-wash: #fff1e6;      /* behind --accent-ink: a risk mark (5.0:1, passes AA) */
   --on-brand-soft: #c9dcff;
   --on-brand-warn: #ffb27a;
 
@@ -141,7 +142,7 @@ button:not(:disabled):active { transform: translateY(1px); }
   color: var(--on-brand-soft);
 }
 
-.views { display: flex; gap: var(--s1); }
+.views { display: flex; flex-wrap: wrap; gap: var(--s1); }
 
 .views a {
   display: inline-flex;
@@ -470,6 +471,55 @@ td.num { white-space: nowrap; font-weight: 600; }
 .source-detail { overflow-wrap: anywhere; }
 .source-detail a { color: var(--brand-2-ink); }
 .source-actions { display: flex; gap: var(--s1); flex-shrink: 0; }
+
+/* --- Enrichment ------------------------------------------------------------------- */
+
+.enrich-panel .sub { max-width: 80ch; }
+.enrich-facts { margin: var(--s3) 0 0; padding-left: var(--s5); display: grid; gap: var(--s1); }
+.enrich-actions { display: flex; flex-wrap: wrap; gap: var(--s2); margin-top: var(--s3); }
+
+.enrich-bar { display: grid; gap: var(--s2); margin-bottom: var(--s4); }
+.enrich-bar .sub { margin: 0; }
+.enrich-bar .enrich-actions { margin-top: 0; }
+.enrich-progress { display: grid; gap: var(--s2); }
+
+.progress {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--rule-soft);
+  overflow: hidden;
+}
+.progress span {
+  display: block;
+  height: 100%;
+  background: var(--brand);
+  transition: width var(--dur) var(--ease);
+}
+
+.clear-confirm { display: grid; gap: var(--s3); }
+.clear-confirm .sub { margin: 0; max-width: 80ch; }
+.clear-confirm .enrich-actions { margin-top: 0; }
+
+.enrich-companies { margin-bottom: var(--s4); }
+.enrich-companies summary { cursor: pointer; font-weight: 600; color: var(--ink-mid); }
+.enrich-companies .source-list { margin-top: var(--s3); }
+
+.state {
+  padding: 1px var(--s2);
+  border-radius: var(--r-sm);
+  background: var(--rule-soft);
+  color: var(--ink-mid);
+  font-size: 12px;
+  font-weight: 600;
+}
+.state--done { background: var(--wash); color: var(--brand); }
+.state--queued, .state--working { color: var(--brand-2-ink); }
+.state--failed { color: var(--accent-ink); }
+
+.tags--tight { margin: 0; }
+.tag--warn { background: var(--accent-wash); color: var(--accent-ink); }
+.contact { overflow-wrap: anywhere; }
+.contact a, .contact-link { color: var(--brand-2-ink); }
 
 /* --- Health ----------------------------------------------------------------------- */
 

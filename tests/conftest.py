@@ -2,7 +2,7 @@
 
 Points the app at a throwaway database *before* anything imports settings, so
 tests can never read or write the real ledger. Every paid service is switched
-off: no test reaches Bedrock, Apify or Firecrawl.
+off: no test reaches Bedrock, Apify, Firecrawl or SignalHire.
 """
 
 from __future__ import annotations
@@ -23,6 +23,7 @@ os.environ["SCHEDULER_ENABLED"] = "false"
 # Nor reach a paid service: tests that need a credential set a fake one.
 os.environ["APIFY_API_TOKEN"] = ""
 os.environ["FIRECRAWL_API_KEY"] = ""
+os.environ["SIGNALHIRE_API_KEY"] = ""
 os.environ["GUARDRAILS_ENABLED"] = "false"
 os.environ["GUARDRAIL_ID"] = ""
 os.environ["AWS_BEARER_TOKEN_BEDROCK"] = ""
@@ -31,8 +32,8 @@ import pytest  # noqa: E402
 
 from app.db import engine, init_db, session_scope  # noqa: E402
 from app.models import (  # noqa: E402
-    BlockedItem, FundedStartup, GuardrailVerdict, LlmCall, PipelineRun, SeenItem, SourceRun,
-    StartupEvent, UserSource,
+    BlockedItem, EnrichedContact, EnrichmentCompany, FundedStartup, GuardrailVerdict, LlmCall,
+    PipelineRun, SeenItem, SourceRun, StartupEvent, UserSource,
 )
 
 
@@ -58,10 +59,23 @@ def _no_real_bedrock(monkeypatch):
     monkeypatch.setattr(bedrock, "get_client", refuse)
 
 
+@pytest.fixture(autouse=True)
+def _no_real_signalhire(monkeypatch):
+    """Nor SignalHire, whose lookups spend credits; nor wait out its rate limits."""
+    from app.search import signalhire
+
+    def refuse(timeout=None):
+        raise AssertionError("a test tried to reach the real SignalHire")
+
+    monkeypatch.setattr(signalhire, "_client", refuse)
+    monkeypatch.setattr(signalhire, "_sleep", lambda seconds: None)
+
+
 def wipe() -> None:
     with session_scope() as s:
         for model in (SourceRun, PipelineRun, BlockedItem, GuardrailVerdict, SeenItem,
-                      FundedStartup, StartupEvent, LlmCall, UserSource):
+                      FundedStartup, StartupEvent, LlmCall, UserSource, EnrichedContact,
+                      EnrichmentCompany):
             s.query(model).delete()
 
 

@@ -19,7 +19,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import scheduler
-from .api import blocked, events, export, funding, refresh, sources, status
+from .api import blocked, enrichment, events, export, funding, refresh, sources, status
 from .config import BACKEND_DIR, settings
 from .db import init_db
 
@@ -66,6 +66,7 @@ app.include_router(status.router)
 app.include_router(refresh.router)
 app.include_router(blocked.router)
 app.include_router(sources.router)
+app.include_router(enrichment.router)
 
 # Headers every response carries. The pages show text and links taken from
 # other sites, so the browser is told not to sniff types, not to be framed,

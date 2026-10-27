@@ -1,15 +1,18 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, parseTime, type Status } from "./api";
 import { describeAge, timeFmt } from "./dates";
+import Enrichment from "./Enrichment";
 import Events from "./Events";
 import Funding from "./Funding";
 import RefreshButton from "./RefreshButton";
 import { useRefreshSync } from "./useRefreshSync";
 
-type View = "funding" | "events";
+type View = "funding" | "events" | "enrichment";
 
 function viewFromHash(): View {
-  return window.location.hash === "#events" ? "events" : "funding";
+  if (window.location.hash === "#events") return "events";
+  if (window.location.hash === "#enrichment") return "enrichment";
+  return "funding";
 }
 
 function Masthead({ status, view, onView, onRefreshed, onMessage }: {
@@ -40,6 +43,11 @@ function Masthead({ status, view, onView, onRefreshed, onMessage }: {
              onClick={() => onView("events")}>
             Events in India
             {status && <span className="count">{status.upcoming_events}</span>}
+          </a>
+          <a href="#enrichment" aria-current={view === "enrichment" ? "page" : undefined}
+             onClick={() => onView("enrichment")}>
+            Enrichment
+            {status && <span className="count">{status.enriched_contacts}</span>}
           </a>
         </nav>
         <div className="masthead-right">
@@ -106,6 +114,15 @@ export default function App() {
     loadStatus();
   }, [loadStatus]);
 
+  // "Send data for enrichment" went through: show where the contacts arrive.
+  const openEnrichment = useCallback((message: string | null) => {
+    setNote(message);
+    window.location.hash = "#enrichment";
+    setView("enrichment");
+    window.scrollTo({ top: 0 });
+    loadStatus();
+  }, [loadStatus]);
+
   // A scheduled run elsewhere finished: bring both feeds up to date.
   useRefreshSync((next) => {
     setStatus(next);
@@ -125,7 +142,11 @@ export default function App() {
             <button onClick={() => setNote(null)}>Dismiss</button>
           </p>
         )}
-        {view === "funding" ? <Funding reloadKey={reloadKey} /> : <Events reloadKey={reloadKey} />}
+        {view === "funding" && <Funding reloadKey={reloadKey} onEnrichment={openEnrichment} />}
+        {view === "events" && <Events reloadKey={reloadKey} />}
+        {view === "enrichment" && (
+          <Enrichment reloadKey={reloadKey} onChanged={loadStatus} onMessage={setNote} />
+        )}
         <Health status={status} />
       </main>
     </>
